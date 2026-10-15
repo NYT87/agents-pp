@@ -28,7 +28,7 @@ Every round is written to disk, so each agent reads the other's output from a fi
 ### As a plugin (recommended: adds Stop-hook enforcement)
 
 ```bash
-claude plugin marketplace add nyt87/agents-pp
+claude plugin marketplace add NYT87/agents-pp
 claude plugin install review-loop@agents-pp
 ```
 
