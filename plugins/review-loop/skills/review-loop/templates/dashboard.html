@@ -43,7 +43,7 @@
   .tile .label { color: var(--muted); font-size: 12px; }
   .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
   .tile .sub { color: var(--ink-2); font-size: 12px; }
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
   .card h2 { font-size: 14px; margin: 0 0 4px; }
   .card .hint { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
@@ -123,6 +123,13 @@
       <div class="hint">Review rounds until the loop ended. The cap is shown as a faint marker.</div>
       <div id="chart-rounds"></div>
     </div>
+    <div class="card" id="card-time">
+      <h2>Time per loop</h2>
+      <div class="hint">Minutes spent per agent across all rounds: coder time runs from the start of a round to the review (pauses excluded); review time is the reviewer run.</div>
+      <div class="legend"><span><i style="background:var(--s1)"></i>coder</span><span><i style="background:var(--s2)"></i>reviewer</span></div>
+      <div id="chart-time"></div>
+      <div class="hint" id="time-note"></div>
+    </div>
     <div class="card" id="card-tokens">
       <h2>Tokens per loop</h2>
       <div class="hint">Output tokens by agent, loops with usage tracking only. Input and cache figures are in the loop detail.</div>
@@ -137,7 +144,7 @@
     <div style="overflow:auto">
     <table id="loops">
       <thead><tr>
-        <th>Started</th><th>Task</th><th>Outcome</th><th class="num">Rounds</th><th class="opt">Backend</th><th class="num opt">Duration</th><th class="num opt">Cost</th>
+        <th>Started</th><th>Task</th><th>Outcome</th><th class="num">Rounds</th><th class="opt">Backend</th><th class="num opt">Coder</th><th class="num opt">Review</th><th class="num opt">Cost</th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -149,6 +156,73 @@
 <div id="tooltip"></div>
 
 <script id="rl-data" type="application/json">{{DATA}}</script>
+<script id="rl-derive">
+// Pure helpers (no DOM) so they can be unit-tested with Node.
+var RL = (function () {
+  'use strict';
+  const OUTCOME = {
+    approved: ['good', 'Approved'], max_rounds_reached: ['serious', 'Max rounds'], cancelled: ['neutral', 'Cancelled'],
+    no_work: ['critical', 'No work'], review_not_run: ['critical', 'Reviewer not run'], hook_error: ['critical', 'Hook error'],
+    active: ['active', 'Active'], paused: ['warning', 'Paused'], failed: ['critical', 'Failed']
+  };
+  const sumUsage = (rows, key) => rows.reduce((acc, r) => {
+    const u = r[key]; if (!u) return acc;
+    for (const k of ['input_tokens', 'cached_input_tokens', 'cache_write_tokens', 'output_tokens', 'reasoning_tokens']) acc[k] = (acc[k] || 0) + (u[k] || 0);
+    if (u.cost_usd != null) acc.cost_usd = (acc.cost_usd || 0) + u.cost_usd;
+    acc.any = true; return acc;
+  }, {});
+  // Derive everything the page shows for one loop record.
+  function deriveLoop(l) {
+    const st = l.state || {};
+    const rounds = Array.isArray(st.rounds) ? st.rounds : [];
+    const files = Array.isArray(l.files) ? l.files : [];
+    const roundCount = Math.max(rounds.length, files.filter(f => f.review).length, 0);
+    const outcome = st.active ? (st.phase === 'paused' ? 'paused' : 'active') : (st.outcome || st.phase || 'failed');
+    const start = Date.parse(st.started_at), end = Date.parse(st.finished_at);
+    const duration = (!isNaN(start) && !isNaN(end)) ? Math.round((end - start) / 1000) : null;
+    const coder = sumUsage(rounds, 'coder'), reviewer = sumUsage(rounds, 'reviewer');
+    const cost = (coder.cost_usd != null || reviewer.cost_usd != null) ? (coder.cost_usd || 0) + (reviewer.cost_usd || 0) : null;
+    // Coder time: only a total when EVERY round recorded it; otherwise it is
+    // partial (some rounds predate round timing) or absent.
+    const withCoder = rounds.filter(r => r.coder_duration_s != null);
+    const coderTime = withCoder.reduce((a, r) => a + r.coder_duration_s, 0);
+    const underestimated = rounds.filter(r => r.coder_time_underestimated).length;
+    const coderTimeState = rounds.length === 0 || withCoder.length === 0 ? 'none'
+      : (withCoder.length < rounds.length ? 'partial' : (underestimated ? 'underestimated' : 'complete'));
+    const reviewTime = rounds.reduce((a, r) => a + (r.duration_s || 0), 0);
+    return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), st, rounds, roundCount, outcome, duration, coder, reviewer, cost,
+      files, summary: l.summary, usage: !!st.usage || rounds.some(r => r.reviewer || r.coder),
+      coderTime, coderTimeState, coderRoundsRecorded: withCoder.length, coderRoundsUnderestimated: underestimated, reviewTime };
+  }
+  // Durations never round up: "45s", "1m 30s", "2m", "1h 02m". Floor-based so a
+  // value shown as a lower bound ("at least ...") really is one.
+  function fmtDur(s) {
+    if (s == null || isNaN(s)) return '–';
+    s = Math.floor(s);
+    if (s < 60) return s + 's';
+    if (s < 3600) { const m = Math.floor(s / 60), r = s % 60; return r ? `${m}m ${r}s` : `${m}m`; }
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return `${h}h ${String(m).padStart(2, '0')}m`;
+  }
+  // Coder time with its completeness: "12m 05s" / "≥ 1m 30s*" or the long
+  // "at least 1m 30s (2 of 3 rounds recorded)" / "–".
+  function fmtCoderTime(l, long) {
+    if (l.coderTimeState === 'complete') return fmtDur(l.coderTime);
+    if (l.coderTimeState === 'partial') return long
+      ? `at least ${fmtDur(l.coderTime)} (${l.coderRoundsRecorded} of ${l.rounds.length} rounds recorded)`
+      : `≥ ${fmtDur(l.coderTime)}*`;
+    if (l.coderTimeState === 'underestimated') return long
+      ? `at least ${fmtDur(l.coderTime)} (a pause ended late in ${l.coderRoundsUnderestimated} round${l.coderRoundsUnderestimated === 1 ? '' : 's'})`
+      : `≥ ${fmtDur(l.coderTime)}*`;
+    return '–';
+  }
+  // Chart value in minutes, floored to a tenth so a bar never exceeds the
+  // seconds it represents (a partial coder bar is a lower bound).
+  const minutesFloor = s => Math.floor((s || 0) / 6) / 10;
+  return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor };
+})();
+if (typeof module !== 'undefined') module.exports = RL;
+</script>
 <script>
 (function () {
   'use strict';
@@ -157,7 +231,8 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtNum = n => n == null ? '–' : Number(n).toLocaleString();
   const fmtCost = c => c == null ? '–' : '$' + Number(c).toFixed(c < 0.1 ? 4 : 2);
-  const fmtDur = s => s == null ? '–' : s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : (s / 3600).toFixed(1) + 'h';
+  const fmtDur = RL.fmtDur;
+  const fmtCoderTime = RL.fmtCoderTime;
   const fmtDate = iso => { if (!iso) return '–'; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); };
 
   // ── theme ────────────────────────────────────────────────────────────────
@@ -171,28 +246,8 @@
   };
 
   // ── derive ───────────────────────────────────────────────────────────────
-  const OUTCOME = {
-    approved: ['good', 'Approved'], max_rounds_reached: ['serious', 'Max rounds'], cancelled: ['neutral', 'Cancelled'],
-    no_work: ['critical', 'No work'], review_not_run: ['critical', 'Reviewer not run'], hook_error: ['critical', 'Hook error'],
-    active: ['active', 'Active'], paused: ['warning', 'Paused'], failed: ['critical', 'Failed']
-  };
-  const sumUsage = (rows, key) => rows.reduce((acc, r) => {
-    const u = r[key]; if (!u) return acc;
-    for (const k of ['input_tokens', 'cached_input_tokens', 'cache_write_tokens', 'output_tokens', 'reasoning_tokens']) acc[k] = (acc[k] || 0) + (u[k] || 0);
-    if (u.cost_usd != null) acc.cost_usd = (acc.cost_usd || 0) + u.cost_usd;
-    acc.any = true; return acc;
-  }, {});
-  const loops = DATA.loops.map(l => {
-    const st = l.state || {};
-    const rounds = Array.isArray(st.rounds) ? st.rounds : [];
-    const roundCount = Math.max(rounds.length, l.files.filter(f => f.review).length, 0);
-    const outcome = st.active ? (st.phase === 'paused' ? 'paused' : 'active') : (st.outcome || st.phase || 'failed');
-    const start = Date.parse(st.started_at), end = Date.parse(st.finished_at);
-    const duration = (!isNaN(start) && !isNaN(end)) ? Math.round((end - start) / 1000) : null;
-    const coder = sumUsage(rounds, 'coder'), reviewer = sumUsage(rounds, 'reviewer');
-    const cost = (coder.cost_usd != null || reviewer.cost_usd != null) ? (coder.cost_usd || 0) + (reviewer.cost_usd || 0) : null;
-    return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), st, rounds, roundCount, outcome, duration, coder, reviewer, cost, files: l.files, summary: l.summary, usage: !!st.usage || rounds.some(r => r.reviewer || r.coder) };
-  });
+  const OUTCOME = RL.OUTCOME;
+  const loops = DATA.loops.map(RL.deriveLoop);
 
   // ── filters ──────────────────────────────────────────────────────────────
   const fo = $('#f-outcome'), fb = $('#f-backend');
@@ -303,6 +358,13 @@
       segments: [{ value: l.roundCount, color: 'var(--s1)' }],
       tip: () => `<b>${esc(l.task)}</b><br>${chip(l.outcome)} · ${l.roundCount} of ${l.st.max_rounds} rounds · ${esc(l.st.backend)}`
     })), { label: 'Rounds per loop', max: Math.max(0, ...rows.map(l => l.st.max_rounds || 0)) });
+    const timeRows = rows.filter(l => l.coderTime + l.reviewTime > 0).slice(0, 25);
+    barChart($('#chart-time'), timeRows.map(l => ({
+      id: l.id, label: label(l) + (l.coderTimeState === 'partial' || l.coderTimeState === 'underestimated' ? ' *' : ''),
+      segments: [{ name: 'coder', value: RL.minutesFloor(l.coderTime), color: 'var(--s1)' }, { name: 'reviewer', value: RL.minutesFloor(l.reviewTime), color: 'var(--s2)' }],
+      tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${s.name === 'coder' ? fmtCoderTime(l, true) : fmtDur(l.reviewTime)}<br>coder ${fmtCoderTime(l, true)} · reviewer ${fmtDur(l.reviewTime)} · ${l.roundCount} round${l.roundCount === 1 ? '' : 's'}`
+    })), { label: 'Minutes per loop' });
+    $('#time-note').textContent = timeRows.some(l => l.coderTimeState === 'partial' || l.coderTimeState === 'underestimated') ? '* lower bound: some rounds of this loop were recorded before coder timing existed, or a pause ended late (no resume hook), so the coder bar is at least this long.' : '';
     const tokRows = rows.filter(l => l.usage && ((l.coder.output_tokens || 0) + (l.reviewer.output_tokens || 0)) > 0).slice(0, 25);
     $('#card-tokens').style.display = '';
     barChart($('#chart-tokens'), tokRows.map(l => ({
@@ -318,8 +380,9 @@
       <td>${chip(l.outcome)}</td>
       <td class="num">${l.roundCount} / ${l.st.max_rounds || '?'}</td>
       <td class="opt">${esc(l.st.backend)}${l.st.model ? ' <span class="mono">' + esc(l.st.model) + '</span>' : ''}</td>
-      <td class="num opt">${fmtDur(l.duration)}</td>
-      <td class="num opt">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No loops match.</td></tr>';
+      <td class="num opt" title="${l.coderTimeState === 'complete' ? 'coder time, all rounds' : esc(fmtCoderTime(l, true))}">${fmtCoderTime(l)}</td>
+      <td class="num opt" title="review time, all rounds">${l.reviewTime ? fmtDur(l.reviewTime) : '–'}</td>
+      <td class="num opt">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No loops match.</td></tr>';
     document.querySelectorAll('#loops tbody tr[data-id]').forEach(tr => tr.onclick = () => select(tr.dataset.id));
     renderDetail();
   }
@@ -342,6 +405,7 @@
       return `<div class="round">
         <h3>Round ${f.round} ${r.verdict ? `<span class="chip ${r.verdict === 'approved' ? 'good' : 'serious'}"><i></i>${esc(r.verdict.replace('_', ' '))}</span>` : ''}
           ${r.blocking != null ? `<span class="chip neutral"><i></i>${r.blocking} blocking</span>` : ''}
+          ${r.coder_duration_s != null ? `<span class="chip neutral" title="${r.coder_time_underestimated ? 'a pause ended late: lower bound' : ''}"><i></i>coder ${r.coder_time_underestimated ? '≥ ' : ''}${fmtDur(r.coder_duration_s)}</span>` : ''}
           ${r.duration_s != null ? `<span class="chip neutral"><i></i>review ${fmtDur(r.duration_s)}</span>` : ''}</h3>
         <div class="pair">
           <div class="doc"><div class="who">Coder</div><div class="md">${f.coder ? md(f.coder) : '<span class="empty">not written</span>'}</div></div>
@@ -355,6 +419,7 @@
       <div class="kv"><span>id <b class="mono">${esc(l.id)}</b></span><span>backend <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}</b></span>
         <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b></span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
         ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
+        <span>coder time <b>${fmtCoderTime(l, true)}</b></span><span>review time <b>${fmtDur(l.reviewTime)}</b></span>
         ${l.usage ? `<span>cost <b>${fmtCost(l.cost)}</b></span>` : ''}<span>dir <b class="mono">${esc(l.dir)}</b></span></div>
       ${roundsHtml || '<div class="empty">No rounds yet.</div>'}
       ${l.summary ? `<div class="round"><h3>Summary</h3><div class="doc"><div class="md">${md(l.summary)}</div></div></div>` : ''}

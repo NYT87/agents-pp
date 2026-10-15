@@ -20,6 +20,12 @@ OUTPUT_FILE="$2"
 ROUND="${REVIEW_LOOP_ROUND:-1}"
 PREV=$(( ROUND - 1 ))
 
+# Test clock: advance REVIEW_LOOP_FAKE_CLOCK by REVIEW_LOOP_FAKE_TAKES seconds so
+# an attempt has a measurable duration without sleeping.
+if [ -n "${REVIEW_LOOP_FAKE_CLOCK:-}" ] && [ -n "${REVIEW_LOOP_FAKE_TAKES:-}" ] && [ -f "$REVIEW_LOOP_FAKE_CLOCK" ]; then
+  echo $(( $(cat "$REVIEW_LOOP_FAKE_CLOCK") + REVIEW_LOOP_FAKE_TAKES )) > "$REVIEW_LOOP_FAKE_CLOCK"
+fi
+
 MODE="approved"
 if [ -n "${REVIEW_LOOP_FAKE_FILE:-}" ] && [ -s "$REVIEW_LOOP_FAKE_FILE" ]; then
   MODE=$(head -1 "$REVIEW_LOOP_FAKE_FILE")

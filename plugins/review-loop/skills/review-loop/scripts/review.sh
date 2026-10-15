@@ -81,35 +81,60 @@ PROMPT=${PROMPT//'{{REVIEW_FORMAT}}'/$REVIEW_FORMAT}
 PROMPT=${PROMPT//'{{LOOP_DIR}}'/$RL_LOOP_DIR}
 printf '%s\n' "$PROMPT" > "$PROMPT_FILE"
 
+# ── Coder time for this round (round start -> now, pauses excluded) ──────────
+if [ -n "$(rl_state_get "$RL_LOOP_DIR" paused_at_epoch)" ]; then
+  # No UserPromptSubmit hook recorded the user's reply; end the pause now. The
+  # work done since the reply is then counted as paused.
+  rl_resume_pause "$RL_LOOP_DIR" "review.sh fallback" late || true
+fi
+UNDERESTIMATED=$(rl_state_get "$RL_LOOP_DIR" coder_time_underestimated)
+if [ "$UNDERESTIMATED" = "true" ]; then
+  echo "review-loop: warning: a pause in this round was only ended at the next stop or now, not at your reply, so the round's coder time is underestimated (install the plugin hooks, including UserPromptSubmit, to record resumes)"
+else
+  UNDERESTIMATED=false
+fi
+CODER_S=$(rl_round_coder_seconds "$RL_LOOP_DIR") || CODER_S=""
+rl_log "$RL_LOOP_DIR" "review.sh: round $ROUND coder time ${CODER_S:-unknown}s"
+
 # ── Run the backend ──────────────────────────────────────────────────────────
-echo "review-loop: round $ROUND/$MAX_ROUNDS — running reviewer backend '$BACKEND'${MODEL:+ (model: $MODEL)}"
+echo "review-loop: round $ROUND/$MAX_ROUNDS — coder worked $([ "$UNDERESTIMATED" = true ] && printf 'at least ')$(rl_fmt_dur "$CODER_S"); running reviewer backend '$BACKEND'${MODEL:+ (model: $MODEL)}"
 rl_log "$RL_LOOP_DIR" "review.sh: round $ROUND backend=$BACKEND model=${MODEL:-default} start"
-START=$(date +%s)
+START=$(rl_epoch)
 set +e
 REVIEW_LOOP_NESTED=1 REVIEW_LOOP_MODEL="$MODEL" REVIEW_LOOP_ROUND="$ROUND" REVIEW_LOOP_USAGE="$USAGE_ON" \
   REVIEW_LOOP_LOOP_DIR="$RL_LOOP_DIR" REVIEW_LOOP_ROOT="$RL_ROOT" \
   bash "$BACKEND_SCRIPT" "$PROMPT_FILE" "$RAW_FILE"
 RC=$?
 set -e
-ELAPSED=$(( $(date +%s) - START ))
+ELAPSED=$(( $(rl_epoch) - START ))
+
+# A failed attempt must not count as coder time when the round is retried.
+note_failed_attempt() {
+  rl_state_update "$RL_LOOP_DIR" --argjson e "$ELAPSED" '.failed_review_s = ((.failed_review_s // 0) + $e)' || true
+  rl_log "$RL_LOOP_DIR" "review.sh: failed attempt took ${ELAPSED}s (excluded from coder time)"
+}
 
 if [ "$RC" -ne 0 ]; then
   rm -f "$RAW_FILE" "$RAW_FILE.tmp"
+  note_failed_attempt
   rl_log "$RL_LOOP_DIR" "review.sh: backend '$BACKEND' failed (exit=$RC, ${ELAPSED}s)"
   rl_die "reviewer backend '$BACKEND' failed (exit $RC after ${ELAPSED}s). Check the output above and $RL_LOOP_DIR/loop.log, fix the cause, then run this script again."
 fi
 if [ ! -s "$RAW_FILE" ]; then
+  note_failed_attempt
   rl_log "$RL_LOOP_DIR" "review.sh: backend '$BACKEND' produced no output (${ELAPSED}s)"
   rl_die "reviewer backend '$BACKEND' produced no output. Run this script again."
 fi
 
 # ── Validate and install ─────────────────────────────────────────────────────
 if ! VERDICT=$(rl_parse_verdict "$RAW_FILE"); then
+  note_failed_attempt
   mv "$RAW_FILE" "$RL_LOOP_DIR/round-$NN-review.invalid.md"
   rl_log "$RL_LOOP_DIR" "review.sh: no verdict found in backend output (${ELAPSED}s)"
   rl_die "the reviewer's output contains no 'VERDICT: approved|changes_requested' line (kept at $RL_LOOP_DIR/round-$NN-review.invalid.md). Run this script again."
 fi
 if ! PROBLEM=$(rl_validate_review "$RAW_FILE" "$VERDICT"); then
+  note_failed_attempt
   mv "$RAW_FILE" "$RL_LOOP_DIR/round-$NN-review.invalid.md"
   rm -f "$RAW_FILE".*
   rl_log "$RL_LOOP_DIR" "review.sh: review rejected: $PROBLEM (${ELAPSED}s)"
@@ -145,14 +170,14 @@ if [ "$USAGE_ON" = "1" ]; then
     if [ -n "$PREV_CUM" ]; then CODER_USAGE=$(rl_usage_sub "$CODER_CUM" "$PREV_CUM"); else CODER_USAGE="$CODER_CUM"; fi
     rl_state_update "$RL_LOOP_DIR" --argjson c "$CODER_CUM" '.coder_usage_cum = $c'
   fi
-  rl_state_update "$RL_LOOP_DIR" --argjson r "$ROUND" --arg v "$VERDICT" --argjson b "$BLOCKING" --argjson d "$ELAPSED" \
+  rl_state_update "$RL_LOOP_DIR" --argjson r "$ROUND" --arg v "$VERDICT" --argjson b "$BLOCKING" --argjson d "$ELAPSED" --argjson cd "${CODER_S:-null}" --argjson u "$UNDERESTIMATED" \
     --argjson rev "$REVIEWER_USAGE" --argjson cod "$CODER_USAGE" \
-    '.rounds = ((.rounds // []) | map(select(.round != $r))) + [{round: $r, verdict: $v, blocking: $b, duration_s: $d, reviewer: $rev, coder: $cod}]'
+    '.rounds = ((.rounds // []) | map(select(.round != $r))) + [{round: $r, verdict: $v, blocking: $b, coder_duration_s: $cd, coder_time_underestimated: $u, duration_s: $d, reviewer: $rev, coder: $cod}]'
   rl_write_usage_md "$RL_LOOP_DIR"
   rl_log "$RL_LOOP_DIR" "review.sh: usage reviewer=$(jq -r '"\(.input_tokens)+\(.cached_input_tokens)c in / \(.output_tokens) out, cost \(.cost_usd // "n/a")"' <<< "$REVIEWER_USAGE") coder=$(jq -r 'if . == null then "n/a" else "\(.input_tokens)+\(.cached_input_tokens)c in / \(.output_tokens) out" end' <<< "$CODER_USAGE")"
 else
-  rl_state_update "$RL_LOOP_DIR" --argjson r "$ROUND" --arg v "$VERDICT" --argjson b "$BLOCKING" --argjson d "$ELAPSED" \
-    '.rounds = ((.rounds // []) | map(select(.round != $r))) + [{round: $r, verdict: $v, blocking: $b, duration_s: $d}]'
+  rl_state_update "$RL_LOOP_DIR" --argjson r "$ROUND" --arg v "$VERDICT" --argjson b "$BLOCKING" --argjson d "$ELAPSED" --argjson cd "${CODER_S:-null}" --argjson u "$UNDERESTIMATED" \
+    '.rounds = ((.rounds // []) | map(select(.round != $r))) + [{round: $r, verdict: $v, blocking: $b, coder_duration_s: $cd, coder_time_underestimated: $u, duration_s: $d}]'
 fi
 rm -f "$RAW_FILE".*
 
@@ -162,7 +187,7 @@ if [ "$VERDICT" = "approved" ]; then
   rl_state_update "$RL_LOOP_DIR" --arg v "$VERDICT" '.verdict = $v | .retries = 0'
   rl_finalize "$RL_LOOP_DIR" "$RL_ROOT" "approved" "done" "Approved by the reviewer in round $ROUND."
   cat << OUT
-review-loop: APPROVED in round $ROUND of $MAX_ROUNDS (${ELAPSED}s).
+review-loop: APPROVED in round $ROUND of $MAX_ROUNDS (coder $([ "$UNDERESTIMATED" = true ] && printf 'at least ')$(rl_fmt_dur "$CODER_S"), review $(rl_fmt_dur "$ELAPSED")).
   review:  $REVIEW_FILE
   summary: $RL_LOOP_DIR/summary.md$([ "$USAGE_ON" = "1" ] && printf '\n  usage:   %s/usage.md' "$RL_LOOP_DIR")
 
@@ -176,7 +201,7 @@ if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
   rl_state_update "$RL_LOOP_DIR" --arg v "$VERDICT" '.verdict = $v | .retries = 0'
   rl_finalize "$RL_LOOP_DIR" "$RL_ROOT" "max_rounds_reached" "done" "The reviewer still requested changes after $ROUND round(s); the loop stopped at the configured maximum."
   cat << OUT
-review-loop: CHANGES REQUESTED in round $ROUND, and the maximum of $MAX_ROUNDS round(s) is reached.
+review-loop: CHANGES REQUESTED in round $ROUND (coder $([ "$UNDERESTIMATED" = true ] && printf 'at least ')$(rl_fmt_dur "$CODER_S"), review $(rl_fmt_dur "$ELAPSED")), and the maximum of $MAX_ROUNDS round(s) is reached.
   review:  $REVIEW_FILE
   summary: $RL_LOOP_DIR/summary.md
 
@@ -188,11 +213,12 @@ fi
 
 NEXT=$(( ROUND + 1 ))
 NEXT_NN=$(rl_round_nn "$NEXT")
-rl_state_update "$RL_LOOP_DIR" --arg v "$VERDICT" --argjson r "$NEXT" \
-  '.verdict = $v | .round = $r | .phase = "coding" | .retries = 0'
+rl_state_update "$RL_LOOP_DIR" --arg v "$VERDICT" --argjson r "$NEXT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" \
+  '.verdict = $v | .round = $r | .phase = "coding" | .retries = 0
+   | .round_started_at = $t | .round_started_epoch = $e | .paused_s = 0 | .failed_review_s = 0 | del(.paused_at_epoch) | del(.coder_time_underestimated)'
 rl_log "$RL_LOOP_DIR" "review.sh: advanced to round $NEXT"
 cat << OUT
-review-loop: CHANGES REQUESTED in round $ROUND of $MAX_ROUNDS ($BLOCKING blocking item(s), ${ELAPSED}s).
+review-loop: CHANGES REQUESTED in round $ROUND of $MAX_ROUNDS ($BLOCKING blocking item(s); coder $([ "$UNDERESTIMATED" = true ] && printf 'at least ')$(rl_fmt_dur "$CODER_S"), review $(rl_fmt_dur "$ELAPSED")).
   review: $REVIEW_FILE$([ "$USAGE_ON" = "1" ] && printf '\n  usage:  %s/usage.md' "$RL_LOOP_DIR")
 
 Now starting round $NEXT. Do not stop; do this:

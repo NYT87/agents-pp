@@ -13,6 +13,7 @@ runtime deps are `jq` and optionally `git`.
 - `scripts/config.sh` — the only writer of the config files (show/set/unset/init/gitignore/keys); key list, types and validation live there. The `/review-config` skill asks the questions and calls it.
 - `scripts/review.sh` — runs a backend and owns every state transition (round advance, approve, cap).
 - `scripts/stop-hook.sh` — Claude Code Stop hook; enforcement only, no transitions.
+- `scripts/resume-hook.sh` — UserPromptSubmit hook; only ends a pause (`rl_resume_pause`), never blocks.
 - `scripts/backends/*.sh` — one reviewer CLI adapter each; contract in README "Backends".
 - `templates/*.md` — reviewer prompt and the file formats both agents must follow.
 - `scripts/dashboard.sh` + `templates/dashboard.html` — static dashboard generator (defaults from config `dashboard.{dirs,out,open,auto}`; `rl_finalize` regenerates it when `auto` is on); the template gets the loop data substituted into `{{DATA}}` (with `</` escaped) and renders everything client-side with no external resources.
@@ -24,6 +25,7 @@ runtime deps are `jq` and optionally `git`.
 - The Stop hook must always print valid JSON and must never leave a loop active after an internal error.
 - `review.sh` installs `round-NN-review.md` only after validation; a review file on disk is always valid.
 - Usage tracking is opt-in (`state.usage`, `rl_usage_enabled`); `review.sh` exports `REVIEW_LOOP_USAGE=1` to backends only then. Backends may write `OUTPUT_FILE.usage.json` (normalized shape in `lib.sh`, `rl_normalize_usage`); `review.sh` records it per round in `state.json.rounds[]` and regenerates `usage.md`. Coder usage comes from the session transcript (`rl_transcript_usage`), deduplicated by `message.id`.
+- Round timing: `start.sh` and `review.sh` (on advance) set `round_started_at/epoch` and reset `paused_s`; the Stop hook starts a pause and the UserPromptSubmit hook ends it (`rl_resume_pause`; Stop hook and `review.sh` are fallbacks); failed reviewer attempts add to `failed_review_s`; `review.sh` stores `coder_duration_s` (via `rl_round_coder_seconds`, which subtracts pauses and failed attempts) next to the reviewer's `duration_s` in `rounds[]`.
 - Keep the review/coder formats machine-parseable: `### R<round>-C<n>` headings, `- blocking: yes|no`, `- R1-C2: resolved|unresolved|declined-accepted|declined-rejected`, final `VERDICT:` line.
 - Any behaviour change needs a test in `tests/test_loop.sh`. Run `bash tests/run.sh` before finishing.
-- Do not run `sleep` in tests; use `touch -t` to fake mtimes.
+- Do not run `sleep` in tests; use `touch -t` to fake mtimes and `REVIEW_LOOP_FAKE_CLOCK` (a file with epoch seconds read by `rl_epoch`; the fake backend advances it by `REVIEW_LOOP_FAKE_TAKES`) to fake time.

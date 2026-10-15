@@ -783,6 +783,199 @@ assert_eq "init --yes: existing file untouched for other keys" "null" "$(jq .max
 rm -f "$HOME/.claude/review-loop.json"
 assert_contains "unknown command" "unknown command" "$(cd "$R" && bash "$C" bogus 2>&1)"
 
+section "round timings"
+R=$(new_repo r27)
+start "$R" --max-rounds 3 "task" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+assert_eq "start sets round_started_epoch" "number" "$(jq -r '.round_started_epoch | type' "$L/state.json")"
+assert_eq "start sets paused_s" "0" "$(jq .paused_s "$L/state.json")"
+NOW=$(date +%s)
+jq --argjson e "$(( NOW - 100 ))" '.round_started_epoch = $e' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+assert_contains "status shows coder time so far" "coder time:  1m 4" "$(cd "$R" && bash "$S/status.sh")"
+coder "$L" 1; verdicts changes_requested approved
+OUT=$(review "$R")
+assert_contains "review output shows coder time" "coder worked 1m 4" "$OUT"
+assert_contains "verdict line shows both durations" "coder 1m 4" "$OUT"
+CD=$(jq '.rounds[0].coder_duration_s' "$L/state.json")
+[ "$CD" -ge 100 ] && [ "$CD" -le 110 ] && pass "coder_duration_s recorded (~100s)" || fail "coder_duration_s recorded (~100s)" "got $CD"
+assert_eq "review duration still recorded" "number" "$(jq -r '.rounds[0].duration_s | type' "$L/state.json")"
+RS=$(jq .round_started_epoch "$L/state.json")
+[ "$RS" -ge "$NOW" ] && pass "advance resets round start" || fail "advance resets round start" "got $RS"
+assert_eq "advance resets paused_s" "0" "$(jq .paused_s "$L/state.json")"
+assert_contains "status lists recorded rounds" "round 1: changes_requested, 1 blocking, coder 1m 4" "$(cd "$R" && bash "$S/status.sh")"
+H=$(hook "$R" s1 "Which database? REVIEW-LOOP: PAUSE")
+assert_eq "pause records paused_at_epoch" "number" "$(jq -r '.paused_at_epoch | type' "$L/state.json")"
+jq --argjson e "$(( $(date +%s) - 50 ))" '.paused_at_epoch = $e' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+assert_contains "status counts pause while paused" "(paused)" "$(cd "$R" && bash "$S/status.sh")"
+resume() { jq -n --arg c "$1" --arg s "$2" '{cwd: $c, session_id: $s, prompt: "go on"}' | (cd "$1" && bash "$S/resume-hook.sh"); }
+OUT=$(resume "$R" other-session)
+assert_eq "resume hook: foreign session ignored" "{}" "$OUT"
+assert_eq "resume hook: foreign session leaves pause" "number" "$(jq -r '.paused_at_epoch | type' "$L/state.json")"
+OUT=$(resume "$R" s1)
+assert_eq "resume hook prints JSON" "{}" "$OUT"
+PS=$(jq .paused_s "$L/state.json")
+[ "$PS" -ge 50 ] && [ "$PS" -le 60 ] && pass "user reply ends the pause (~50s)" || fail "user reply ends the pause (~50s)" "got $PS"
+assert_eq "user reply clears paused_at_epoch" "null" "$(jq .paused_at_epoch "$L/state.json")"
+assert_eq "user reply sets phase coding" "coding" "$(st "$L" phase)"
+assert_contains "resume logged as user reply" "resumed from pause (user reply)" "$(cat "$L/loop.log")"
+assert_eq "resume hook idempotent" "{}" "$(resume "$R" s1)"
+assert_eq "resume hook: paused_s unchanged when not paused" "$PS" "$(jq .paused_s "$L/state.json")"
+H=$(hook "$R" s1 "continuing")
+assert_eq "stop hook after resume just blocks" "block" "$(decision "$H")"
+assert_eq "stop hook does not double count" "$PS" "$(jq .paused_s "$L/state.json")"
+jq --argjson e "$(( $(date +%s) - 200 ))" '.round_started_epoch = $e' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+coder "$L" 2; review "$R" > /dev/null
+CD=$(jq '.rounds[1].coder_duration_s' "$L/state.json")
+[ "$CD" -ge 140 ] && [ "$CD" -le 160 ] && pass "pause excluded from coder time (~150s)" || fail "pause excluded from coder time (~150s)" "got $CD"
+SUM=$(cat "$L/summary.md")
+assert_contains "summary lists rounds with both durations" "- round 1: changes_requested, 1 blocking, coder 1m 4" "$SUM"
+assert_contains "summary round 2" "- round 2: approved, 0 blocking, coder 2m" "$SUM"
+# resumed work before the reviewer runs, with the resume hook
+R=$(new_repo r29)
+start "$R" --max-rounds 3 "task" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+NOW=$(date +%s)
+jq --argjson e "$(( NOW - 300 ))" '.round_started_epoch = $e' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+hook "$R" s1 "Need input. REVIEW-LOOP: PAUSE" > /dev/null
+jq --argjson e "$(( NOW - 200 ))" '.paused_at_epoch = $e' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+resume "$R" s1 > /dev/null
+jq '.paused_s = 100' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"   # pause lasted 100s, then 100s of work
+coder "$L" 1; verdicts changes_requested approved
+OUT=$(review "$R")
+CD=$(jq '.rounds[0].coder_duration_s' "$L/state.json")
+[ "$CD" -ge 195 ] && [ "$CD" -le 210 ] && pass "work after the reply counts as coder time (~200s)" || fail "work after the reply counts as coder time (~200s)" "got $CD"
+assert_not_contains "no underestimate warning with the hook" "underestimated" "$OUT"
+# same scenario, but a Stop happens after the reply and before review.sh (no resume hook):
+# the fallback ends the pause late; the round must be flagged, not silently undercounted
+hook "$R" s1 "Another question. REVIEW-LOOP: PAUSE" > /dev/null
+NOW=$(date +%s)
+jq --argjson e "$(( NOW - 300 ))" --argjson p "$(( NOW - 200 ))" '.round_started_epoch = $e | .paused_at_epoch = $p | .phase = "paused"' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+H=$(hook "$R" s1 "did 100s of work after the reply")
+assert_eq "stop-hook fallback resumes" "coding" "$(st "$L" phase)"
+assert_eq "stop-hook fallback flags the round" "true" "$(jq .coder_time_underestimated "$L/state.json")"
+assert_contains "stop-hook fallback logged as late" "late: coder time underestimated" "$(cat "$L/loop.log")"
+assert_contains "status shows at least" "coder time:  at least" "$(cd "$R" && bash "$S/status.sh")"
+coder "$L" 2; verdicts changes_requested approved
+OUT=$(review "$R")
+assert_contains "review warns after a stop-hook fallback" "coder time is underestimated" "$OUT"
+assert_contains "review output marks the lower bound" "coder worked at least" "$OUT"
+assert_eq "round record carries the flag" "true" "$(jq '.rounds[1].coder_time_underestimated' "$L/state.json")"
+assert_eq "advance clears the flag" "null" "$(jq .coder_time_underestimated "$L/state.json")"
+assert_contains "status rounds list marks it" "coder at least" "$(cd "$R" && bash "$S/status.sh")"
+# with the resume hook the round is exact and unflagged
+hook "$R" s1 "Third question. REVIEW-LOOP: PAUSE" > /dev/null
+resume "$R" s1 > /dev/null
+hook "$R" s1 "working" > /dev/null
+assert_eq "resume hook keeps the round exact" "null" "$(jq .coder_time_underestimated "$L/state.json")"
+coder "$L" 3; OUT=$(review "$R")
+assert_not_contains "no warning with the resume hook" "underestimated" "$OUT"
+assert_eq "exact round unflagged in the record" "false" "$(jq '.rounds[2].coder_time_underestimated' "$L/state.json")"
+assert_contains "summary marks the late round" "- round 2: changes_requested, 2 blocking, coder at least" "$(cat "$L/summary.md")"
+assert_contains "summary keeps exact rounds plain" "- round 3: approved, 0 blocking, coder " "$(cat "$L/summary.md")"
+assert_not_contains "summary exact round not marked" "- round 3: approved, 0 blocking, coder at least" "$(cat "$L/summary.md")"
+R=$(new_repo r33)
+start "$R" --max-rounds 3 "task" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+# same scenario without the resume hook: review.sh falls back and warns
+hook "$R" s1 "More input. REVIEW-LOOP: PAUSE" > /dev/null
+NOW=$(date +%s)
+jq --argjson e "$(( NOW - 300 ))" --argjson p "$(( NOW - 200 ))" '.round_started_epoch = $e | .paused_at_epoch = $p | .phase = "paused"' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+coder "$L" 1; verdicts approved
+OUT=$(review "$R")
+assert_contains "fallback warns about underestimate" "coder time is underestimated" "$OUT"
+CD=$(jq '.rounds[0].coder_duration_s' "$L/state.json")
+[ "$CD" -ge 95 ] && [ "$CD" -le 110 ] && pass "fallback ends the pause at review time (~100s)" || fail "fallback ends the pause at review time (~100s)" "got $CD"
+assert_eq "fallback clears paused_at_epoch" "null" "$(jq .paused_at_epoch "$L/state.json")"
+assert_eq "review.sh fallback flags the round too" "true" "$(jq '.rounds[0].coder_time_underestimated' "$L/state.json")"
+# failed reviewer attempts are not coder time (deterministic clock, no sleep)
+R=$(new_repo r31)
+CLOCK="$TMP/clock"; echo 1000 > "$CLOCK"; export REVIEW_LOOP_FAKE_CLOCK="$CLOCK"
+start "$R" --max-rounds 3 "task" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+assert_eq "fake clock drives round start" "1000" "$(jq .round_started_epoch "$L/state.json")"
+assert_eq "failed_review_s starts at 0" "0" "$(jq .failed_review_s "$L/state.json")"
+echo 1100 > "$CLOCK"; coder "$L" 1
+verdicts fail garbage approved
+REVIEW_LOOP_FAKE_TAKES=60 review "$R" > /dev/null
+assert_eq "failed backend run recorded" "60" "$(jq .failed_review_s "$L/state.json")"
+assert_eq "clock advanced by the attempt" "1160" "$(cat "$CLOCK")"
+REVIEW_LOOP_FAKE_TAKES=40 review "$R" > /dev/null
+assert_eq "invalid review attempt also recorded" "100" "$(jq .failed_review_s "$L/state.json")"
+echo 1300 > "$CLOCK"   # 100s more coder work fixing the cause
+assert_contains "status excludes failed attempts" "coder time:  3m 20s" "$(cd "$R" && bash "$S/status.sh")"
+OUT=$(REVIEW_LOOP_FAKE_TAKES=25 review "$R")
+assert_eq "coder time excludes failed attempts (300-100)" "200" "$(jq '.rounds[0].coder_duration_s' "$L/state.json")"
+assert_eq "review duration is the successful run" "25" "$(jq '.rounds[0].duration_s' "$L/state.json")"
+assert_contains "output shows coder 3m 20s" "coder 3m 20s" "$OUT"
+assert_contains "failed attempt logged" "failed attempt took 60s (excluded from coder time)" "$(cat "$L/loop.log")"
+unset REVIEW_LOOP_FAKE_CLOCK
+R=$(new_repo r32)
+echo 5000 > "$CLOCK"; export REVIEW_LOOP_FAKE_CLOCK="$CLOCK"
+start "$R" --max-rounds 3 "task" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+coder "$L" 1; verdicts changes_requested approved
+echo 5050 > "$CLOCK"; REVIEW_LOOP_FAKE_TAKES=10 review "$R" > /dev/null
+assert_eq "advance resets failed_review_s" "0" "$(jq .failed_review_s "$L/state.json")"
+assert_eq "advance stamps the new round start from the clock" "5060" "$(jq .round_started_epoch "$L/state.json")"
+echo 5100 > "$CLOCK"; coder "$L" 2; REVIEW_LOOP_FAKE_TAKES=5 review "$R" > /dev/null
+assert_eq "round 2 coder time from its own start" "40" "$(jq '.rounds[1].coder_duration_s' "$L/state.json")"
+unset REVIEW_LOOP_FAKE_CLOCK
+# older loop without coder durations: nothing shifts columns
+R=$(new_repo r30)
+start "$R" --usage "task" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+coder "$L" 1; verdicts changes_requested approved; review "$R" > /dev/null
+jq '.rounds |= map(del(.coder_duration_s)) | del(.round_started_epoch)' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+RD=$(jq '.rounds[0].duration_s' "$L/state.json")
+assert_contains "status: old round keeps review time in its column" "round 1: changes_requested, 1 blocking, coder -, review ${RD}s" "$(cd "$R" && bash "$S/status.sh")"
+assert_contains "status: unknown coder time so far" "coder time:  -" "$(cd "$R" && bash "$S/status.sh")"
+coder "$L" 2; review "$R" > /dev/null
+jq '.rounds |= map(del(.coder_duration_s))' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+(cd "$S" && bash -c '. ./lib.sh; rl_finalize "$1" "$2" approved done' _ "$L" "$R")
+assert_contains "summary: old round columns intact" "- round 1: changes_requested, 1 blocking, coder -, review ${RD}s" "$(cat "$L/summary.md")"
+assert_contains "usage.md: old reviewer row keeps its duration" "| round 1 reviewer | fake-model | 1000 | 500 | 100 | 200 | 50 | 0.01 | 3 | ${RD} |" "$(cat "$L/usage.md")"
+R=$(new_repo r28)
+start "$R" --usage "task" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+jq '.round_started_epoch = (.round_started_epoch - 30)' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+jq '.started_at = "2020-01-01T00:00:00Z"' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+coder "$L" 1; verdicts approved
+H=$(jq -n --arg c "$R" --arg t "$TR" '{cwd: $c, session_id: "s1", transcript_path: $t}' | (cd "$R" && bash "$S/stop-hook.sh"))
+review "$R" > /dev/null
+assert_contains "usage.md coder row carries its duration" "| round 1 coder | claude-x,claude-y | 16 | 1500 | 20 | 175 | 30 | - | 3 | 3" "$(cat "$L/usage.md")"
+OUT=$(cd "$R" && bash "$S/dashboard.sh")
+J=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "dashboard data carries coder_duration_s" "number" "$(printf '%s' "$J" | jq -r '.loops[0].state.rounds[0].coder_duration_s | type')"
+jq 'del(.round_started_epoch)' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+assert_eq "old loops without round timing report unknown" "" "$(cd "$S" && bash -c '. ./lib.sh; rl_round_coder_seconds "$1"' _ "$L")"
+assert_eq "fmt_dur seconds" "45s" "$(cd "$S" && bash -c '. ./lib.sh; rl_fmt_dur 45')"
+assert_eq "fmt_dur minutes" "3m 20s" "$(cd "$S" && bash -c '. ./lib.sh; rl_fmt_dur 200')"
+assert_eq "fmt_dur hours" "1h 02m" "$(cd "$S" && bash -c '. ./lib.sh; rl_fmt_dur 3725')"
+assert_eq "fmt_dur empty" "-" "$(cd "$S" && bash -c '. ./lib.sh; rl_fmt_dur ""')"
+
+section "dashboard derivation (node)"
+if command -v node > /dev/null 2>&1; then
+  DERIVE="$TMP/derive.js"
+  sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
+  OUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const mk = rounds => RL.deriveLoop({ state: { loop_id: "x", rounds, started_at: "2026-01-01T00:00:00Z" }, files: [], task: "t" });
+    const all = mk([{ round: 1, coder_duration_s: 100, duration_s: 10 }, { round: 2, coder_duration_s: 50, duration_s: 20 }]);
+    const mixed = mk([{ round: 1, duration_s: 10 }, { round: 2, coder_duration_s: 50, duration_s: 20 }, { round: 3, coder_duration_s: 25, duration_s: 5 }]);
+    const none = mk([{ round: 1, duration_s: 10 }]);
+    const empty = mk([]);
+    console.log([all.coderTimeState, all.coderTime, all.reviewTime,
+      mixed.coderTimeState, mixed.coderTime, mixed.coderRoundsRecorded, mixed.rounds.length, mixed.reviewTime,
+      none.coderTimeState, none.coderTime, empty.coderTimeState].join(" "));
+    const p90 = mk([{ round: 1, duration_s: 10 }, { round: 2, coder_duration_s: 90, duration_s: 20 }]);
+    const late = mk([{ round: 1, coder_duration_s: 100, duration_s: 10 }, { round: 2, coder_duration_s: 20, coder_time_underestimated: true, duration_s: 5 }]);
+    console.log([late.coderTimeState, late.coderRoundsUnderestimated, RL.fmtCoderTime(late), RL.fmtCoderTime(late, true)].join("|"));
+    console.log([RL.fmtDur(59), RL.fmtDur(90), RL.fmtDur(120), RL.fmtDur(3725), RL.fmtDur(3599), RL.fmtDur(null),
+      RL.fmtCoderTime(p90), RL.fmtCoderTime(p90, true), RL.fmtCoderTime(all), RL.fmtCoderTime(none)].join("|"));
+    console.log([RL.minutesFloor(94), RL.minutesFloor(96), RL.minutesFloor(5), RL.minutesFloor(0), RL.minutesFloor(null)].join(","));
+  ' "$DERIVE")
+  assert_contains "derive: complete / partial / none / empty" "complete 150 30 partial 75 2 3 35 none 0 none" "$OUT"
+  assert_contains "fmtDur never rounds up" "59s|1m 30s|2m|1h 02m|59m 59s|–|" "$OUT"
+  assert_contains "partial 90s shows an honest lower bound" "|≥ 1m 30s*|at least 1m 30s (1 of 2 rounds recorded)|2m 30s|–" "$OUT"
+  assert_contains "chart minutes floor (94s -> 1.5, never 1.6)" "1.5,1.6,0,0,0" "$OUT"
+  assert_contains "late-resume round makes the total a lower bound" "underestimated|1|≥ 2m*|at least 2m (a pause ended late in 1 round)" "$OUT"
+else
+  echo "  skip node not installed"
+fi
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

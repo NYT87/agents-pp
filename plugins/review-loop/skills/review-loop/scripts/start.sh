@@ -117,10 +117,11 @@ printf '%s\n' "$TASK" > "$LOOP_DIR/task.md"
 
 jq -n \
   --arg id "$LOOP_ID" --arg be "$BACKEND" --arg model "$MODEL" --argjson mr "$MAX_ROUNDS" \
-  --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" \
+  --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" \
   '{loop_id: $id, active: true, phase: "coding", round: 1, max_rounds: $mr,
     backend: $be, model: $model, base_ref: $base, dir: $dir, root: $root, usage: $usage,
-    session_id: (if $sid == "" then null else $sid end), started_at: $t, retries: 0, verdict: null, rounds: []}' > "$LOOP_DIR/state.json"
+    session_id: (if $sid == "" then null else $sid end), started_at: $t, retries: 0, verdict: null, rounds: [],
+    round_started_at: $t, round_started_epoch: $e, paused_s: 0, failed_review_s: 0}' > "$LOOP_DIR/state.json"
 
 # Only now, with the new loop fully written, retire the old one (--force).
 if [ "$EXISTING" = "1" ]; then

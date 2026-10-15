@@ -22,6 +22,16 @@ echo "  usage:       $(rl_usage_enabled "$RL_LOOP_DIR" && echo on || echo off)"
 echo "  last verdict: $(rl_state_get "$RL_LOOP_DIR" verdict | sed 's/^$/none/')"
 echo "  started:     $(rl_state_get "$RL_LOOP_DIR" started_at)"
 echo "  retries:     $(rl_state_get "$RL_LOOP_DIR" retries)"
+CODER_S=$(rl_round_coder_seconds "$RL_LOOP_DIR") || CODER_S=""
+echo "  coder time:  $([ "$(rl_state_get "$RL_LOOP_DIR" coder_time_underestimated)" = "true" ] && printf 'at least ')$(rl_fmt_dur "$CODER_S") on round $ROUND so far$([ "$(rl_state_get "$RL_LOOP_DIR" phase)" = "paused" ] && echo " (paused)")$([ "$(rl_state_get "$RL_LOOP_DIR" coder_time_underestimated)" = "true" ] && echo " (a pause ended late: underestimated)")"
+if [ "$(jq -r '(.rounds // []) | length' "$RL_LOOP_DIR/state.json")" != "0" ]; then
+  echo
+  echo "Rounds so far:"
+  jq -r '.rounds[]? | "\(.round)\t\(.verdict // "-")\t\(.blocking // "-")\t\(.coder_duration_s // "-")\t\(.duration_s // "-")\t\(if .coder_time_underestimated then "y" else "n" end)"' "$RL_LOOP_DIR/state.json" \
+    | while IFS=$'\t' read -r rn rv rb rc rd ru; do
+        printf '  round %s: %s, %s blocking, coder %s%s%s, review %s\n' "$rn" "$rv" "$rb" "$([ "$ru" = "y" ] && printf 'at least ')" "$(rl_fmt_dur "$rc")" "$([ "$ru" = "y" ] && printf ' (a pause ended late)')" "$(rl_fmt_dur "$rd")"
+      done
+fi
 echo
 echo "Round $ROUND files:"
 if [ -f "$RL_LOOP_DIR/round-$NN-coder.md" ]; then

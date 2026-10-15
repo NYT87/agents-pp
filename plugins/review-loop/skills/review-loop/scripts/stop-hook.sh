@@ -88,10 +88,10 @@ esac
 
 # ── Pause marker ─────────────────────────────────────────────────────────────
 if [ "$PHASE" = "paused" ]; then
-  rl_state_update "$RL_LOOP_DIR" '.phase = "coding"'
-  rl_log "$RL_LOOP_DIR" "stop hook: resumed from pause"
+  # Fallback resume (the UserPromptSubmit hook normally did this already).
+  rl_resume_pause "$RL_LOOP_DIR" "stop hook fallback" late || true
 elif printf '%s' "$LAST_MSG" | grep -qF "$RL_PAUSE_MARKER"; then
-  rl_state_update "$RL_LOOP_DIR" '.phase = "paused"'
+  rl_state_update "$RL_LOOP_DIR" --argjson now "$(rl_epoch)" '.phase = "paused" | .paused_at_epoch = $now'
   rl_log "$RL_LOOP_DIR" "stop hook: paused by marker"
   emit_allow_msg "review-loop: paused (loop $RL_LOOP_ID, round $ROUND). It resumes on your next message; /review-cancel aborts it."
 fi

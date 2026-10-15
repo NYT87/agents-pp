@@ -57,10 +57,15 @@ Skills are then `/review-loop`, `/review-status`, `/review-cancel`, `/review-das
   "hooks": {
     "Stop": [
       { "hooks": [ { "type": "command", "command": "bash ~/.claude/skills/review-loop/scripts/stop-hook.sh", "timeout": 30 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "bash ~/.claude/skills/review-loop/scripts/resume-hook.sh", "timeout": 10 } ] }
     ]
   }
 }
 ```
+
+The second hook only records when a paused loop resumes (so the coder time of a round excludes exactly the time spent waiting for you); without it, the pause is ended at the next Stop or at the next `review.sh` run, the work done since your reply is lost from the count, and the round is flagged `coder_time_underestimated`: `review.sh` warns, and status, summary and the dashboard show the value as "at least".
 
 ### Requirements
 
@@ -88,7 +93,7 @@ What happens:
 ```
 .review-loop/20261015-143000-a1b2c3/
 ├── task.md               the task
-├── state.json            loop state (round, backend, base commit, session, ...)
+├── state.json            loop state (round, backend, base commit, session, per-round timings, ...)
 ├── round-01-coder.md     coder: what changed, files, how it was verified
 ├── round-01-prompt.md    the exact prompt the reviewer received
 ├── round-01-review.md    reviewer: comments R1-C1.. (severity, blocking, file, line, fix) + verdict
@@ -100,6 +105,10 @@ What happens:
 ```
 
 Add `.review-loop/` and `.claude/review-loop.active` to `.gitignore` if you do not want to commit the trail, or pass `--git-exclude` to exclude them locally. The loop's own files are always hidden from the diff the reviewer and the Stop hook look at; with `--dir .` only the loop folders stored at the root are hidden, never the project.
+
+### Round timings
+
+Every round records two durations in `state.json` (`rounds[]`): `coder_duration_s`, the time from the start of the round (loop start, or the previous review's end) until `review.sh` is run, with time spent paused for the user and time spent in failed reviewer attempts excluded (the plugin's `UserPromptSubmit` hook marks your reply as the end of a pause); and `duration_s`, the successful reviewer run itself. Rounds recorded before this existed show `-`. They show up in `review.sh` output ("coder 12m 30s, review 1m 24s"), `/review-status` (current round so far and all recorded rounds), `summary.md`, `usage.md`, and the dashboard (per-loop coder and review columns, a time-per-loop chart, and chips on each round).
 
 ### Verdict rules
 
@@ -250,7 +259,7 @@ agents-pp/
 │   └── skills/
 │       ├── review-loop/                   self-contained skill (copy this dir for standalone use)
 │       │   ├── SKILL.md
-│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, status.sh, cancel.sh, dashboard.sh, config.sh
+│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, resume-hook.sh, status.sh, cancel.sh, dashboard.sh, config.sh
 │       │   ├── scripts/backends/          codex.sh, claude.sh, fake.sh
 │       │   └── templates/                 reviewer-prompt.md, coder-summary.md, review-format.md, dashboard.html
 │       ├── review-status/SKILL.md

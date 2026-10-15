@@ -15,6 +15,54 @@ RL_PAUSE_MARKER="REVIEW-LOOP: PAUSE"
 RL_MAX_RETRIES=3
 
 rl_now() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+# Epoch seconds. REVIEW_LOOP_FAKE_CLOCK (a file holding a number) replaces the
+# wall clock so the test suite can advance time without sleeping.
+rl_epoch() {
+  if [ -n "${REVIEW_LOOP_FAKE_CLOCK:-}" ] && [ -f "$REVIEW_LOOP_FAKE_CLOCK" ]; then cat "$REVIEW_LOOP_FAKE_CLOCK"; else date +%s; fi
+}
+
+# rl_fmt_dur SECONDS -> "45s", "3m 20s", "1h 02m" ("-" when empty/null)
+rl_fmt_dur() {
+  local s="${1:-}"
+  case "$s" in ""|null|-) echo "-"; return ;; esac
+  if [ "$s" -lt 60 ]; then echo "${s}s"
+  elif [ "$s" -lt 3600 ]; then echo "$(( s / 60 ))m $(( s % 60 ))s"
+  else printf '%dh %02dm\n' "$(( s / 3600 ))" "$(( (s % 3600) / 60 ))"; fi
+}
+
+# rl_resume_pause LOOP_DIR [REASON] [fallback] -> ends a pause: adds the paused
+# time to paused_s, clears paused_at_epoch and sets the phase back to coding.
+# No-op when the loop is not paused. The UserPromptSubmit hook calls it at the
+# user's reply (the real resume point). The Stop hook and review.sh call it as
+# fallbacks with the third argument set: the pause then ended late, work done
+# since the reply was counted as paused, and the round is flagged
+# coder_time_underestimated so nothing presents the number as exact.
+rl_resume_pause() {
+  local paused_at
+  paused_at=$(rl_state_get "$1" paused_at_epoch)
+  if [ -z "$paused_at" ] && [ "$(rl_state_get "$1" phase)" != "paused" ]; then return 1; fi
+  rl_state_update "$1" --argjson now "$(rl_epoch)" --argjson fb "$([ -n "${3:-}" ] && echo true || echo false)" \
+    '.paused_s = ((.paused_s // 0) + (if .paused_at_epoch then ($now - .paused_at_epoch) else 0 end))
+     | del(.paused_at_epoch) | (if .phase == "paused" then .phase = "coding" else . end)
+     | (if $fb and .paused_at_epoch == null then .coder_time_underestimated = true else . end)' || return 1
+  rl_log "$1" "resumed from pause${2:+ ($2)}: paused_s=$(rl_state_get "$1" paused_s)${3:+ (late: coder time underestimated)}"
+}
+
+# rl_round_coder_seconds LOOP_DIR -> seconds the coder has worked on the current
+# round so far: since the round started, minus time spent paused (waiting for
+# the user) and minus time spent in failed reviewer attempts. Empty when the
+# loop predates round timing.
+rl_round_coder_seconds() {
+  local started paused paused_at failed now total
+  started=$(rl_state_get "$1" round_started_epoch); [ -n "$started" ] || return 1
+  paused=$(rl_state_get "$1" paused_s); : "${paused:=0}"
+  failed=$(rl_state_get "$1" failed_review_s); : "${failed:=0}"
+  paused_at=$(rl_state_get "$1" paused_at_epoch)
+  now=$(rl_epoch)
+  [ -n "$paused_at" ] && paused=$(( paused + now - paused_at ))
+  total=$(( now - started - paused - failed ))
+  echo $(( total < 0 ? 0 : total ))
+}
 
 rl_die() { echo "review-loop: $*" >&2; exit 1; }
 
@@ -378,11 +426,11 @@ rl_usage_table() {
   local dir="$1" round label coder reviewer dur coder_total reviewer_total
   echo "| Round / agent | Model | Input (uncached) | Cached input | Cache write | Output | Reasoning | Cost USD | Turns | Duration s |"
   echo "|---|---|---|---|---|---|---|---|---|---|"
-  while IFS=$'\t' read -r round coder reviewer dur; do
+  while IFS=$'\t' read -r round coder reviewer dur cdur; do
     [ -n "$round" ] || continue
-    if [ "$coder" != "null" ]; then rl_usage_row "round $round coder" "$coder"; fi
+    if [ "$coder" != "null" ]; then rl_usage_row "round $round coder" "$coder" "$cdur"; fi
     rl_usage_row "round $round reviewer" "$reviewer" "$dur"
-  done < <(jq -r '.rounds[]? | [.round, (.coder | tojson), (.reviewer | tojson), (.duration_s // "")] | @tsv' "$dir/state.json" 2>/dev/null)
+  done < <(jq -r '.rounds[]? | [.round, (.coder | tojson), (.reviewer | tojson), (.duration_s // "-"), (.coder_duration_s // "-")] | @tsv' "$dir/state.json" 2>/dev/null)
   coder_total=$(rl_coder_usage_cumulative "$dir") || coder_total=""
   reviewer_total=$(rl_reviewer_usage_total "$dir")
   if [ -n "$coder_total" ]; then rl_usage_row "TOTAL coder" "$coder_total"; else echo "| TOTAL coder | n/a (no session transcript found) | | | | | | | | |"; fi
@@ -424,6 +472,15 @@ rl_finalize() {
     echo "- finished_at: $(rl_now)"
     [ -n "$detail" ] && { echo; echo "$detail"; }
     echo
+    if [ "$(jq -r '(.rounds // []) | length' "$dir/state.json" 2>/dev/null)" != "0" ]; then
+      echo "## Rounds"
+      echo
+      jq -r '.rounds[]? | "\(.round)\t\(.verdict // "-")\t\(.blocking // "-")\t\(.coder_duration_s // "-")\t\(.duration_s // "-")\t\(if .coder_time_underestimated then "y" else "n" end)"' "$dir/state.json" 2>/dev/null \
+        | while IFS=$'\t' read -r rn rv rb rc rd ru; do
+            echo "- round $rn: $rv, $rb blocking, coder $([ "$ru" = "y" ] && printf 'at least ')$(rl_fmt_dur "$rc")$([ "$ru" = "y" ] && printf ' (a pause ended late)'), review $(rl_fmt_dur "$rd")"
+          done
+      echo
+    fi
     if [ -n "$ids" ]; then
       echo "## Unresolved blocking comments"
       echo

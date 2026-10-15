@@ -1,5 +1,5 @@
 {
-  "description": "review-loop Stop hook: while a loop is active, keep Claude working until the reviewer approves",
+  "description": "review-loop hooks: the Stop hook keeps Claude working until the reviewer approves; the UserPromptSubmit hook records when a paused loop resumes",
   "hooks": {
     "Stop": [
       {
@@ -9,6 +9,17 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/skills/review-loop/scripts/stop-hook.sh\"",
             "timeout": 30,
             "statusMessage": "review-loop: checking loop state..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/skills/review-loop/scripts/resume-hook.sh\"",
+            "timeout": 10
           }
         ]
       }
