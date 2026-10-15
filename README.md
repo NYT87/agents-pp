@@ -38,7 +38,7 @@ Or, from a local checkout, for one session:
 claude --plugin-dir ./plugins/review-loop
 ```
 
-Skills are then available as `/review-loop:review-loop`, `/review-loop:review-status`, `/review-loop:review-cancel` and `/review-loop:review-dashboard`.
+Skills are then available as `/review-loop:review-loop`, `/review-loop:review-status`, `/review-loop:review-cancel`, `/review-loop:review-dashboard` and `/review-loop:review-config`.
 
 ### As a standalone skill (no plugin)
 
@@ -47,9 +47,10 @@ cp -r plugins/review-loop/skills/review-loop   ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-status ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-cancel ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-dashboard ~/.claude/skills/
+cp -r plugins/review-loop/skills/review-config ~/.claude/skills/
 ```
 
-Skills are then `/review-loop`, `/review-status`, `/review-cancel`, `/review-dashboard`. In this mode the loop is driven by the skill's instructions alone. To get the same Stop-hook enforcement as the plugin, add to `~/.claude/settings.json`:
+Skills are then `/review-loop`, `/review-status`, `/review-cancel`, `/review-dashboard`, `/review-config`. In this mode the loop is driven by the skill's instructions alone. To get the same Stop-hook enforcement as the plugin, add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -149,6 +150,29 @@ Generates a self-contained `dashboard.html` (default: inside the storage dir) fr
 
 ## Configuration
 
+The quickest way is the configuration wizard:
+
+```
+/review-config            # project file ./.claude/review-loop.json (default)
+/review-config --user     # personal defaults in ~/.claude/review-loop.json
+```
+
+It shows the current value of every setting, asks what to change, writes the file through `config.sh`, and finally offers to add the loop's paths (storage dir, pointer file, dashboard file) to `.gitignore`. Re-run it any time to update values. The same works outside Claude Code, from your project's root (the script lives in the plugin; adjust the path to where you installed it, e.g. `~/.claude/skills/review-loop/scripts/config.sh` for the standalone skill):
+
+```bash
+CFG=plugins/review-loop/skills/review-loop/scripts/config.sh   # path inside this repo
+bash $CFG show                 # effective, project, user and default values
+bash $CFG create               # empty project file, everything inherited
+bash $CFG set backend=claude model=opus max_rounds=3 usage=true
+bash $CFG set --user dir=reviews dashboard.auto=true
+bash $CFG unset model
+bash $CFG init                 # interactive wizard: Enter keeps a value, "-" clears model/dashboard.out/dashboard.dirs
+bash $CFG gitignore --dry-run  # paths that would be ignored
+bash $CFG keys                 # all keys with types
+```
+
+With `dir` set to the project root (`.`), `gitignore` writes a pattern matching loop-id folder names (`YYYYMMDD-HHMMSS-xxxxxx`) so future loops are covered too; any other folder with that exact shape would be ignored as well.
+
 | Setting | Flag | Env | Config key | Default |
 |---|---|---|---|---|
 | Reviewer backend | `--backend` | `REVIEW_LOOP_BACKEND` | `backend` | `codex` |
@@ -226,12 +250,13 @@ agents-pp/
 │   └── skills/
 │       ├── review-loop/                   self-contained skill (copy this dir for standalone use)
 │       │   ├── SKILL.md
-│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, status.sh, cancel.sh, dashboard.sh
+│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, status.sh, cancel.sh, dashboard.sh, config.sh
 │       │   ├── scripts/backends/          codex.sh, claude.sh, fake.sh
 │       │   └── templates/                 reviewer-prompt.md, coder-summary.md, review-format.md, dashboard.html
 │       ├── review-status/SKILL.md
 │       ├── review-cancel/SKILL.md
-│       └── review-dashboard/SKILL.md
+│       ├── review-dashboard/SKILL.md
+│       └── review-config/SKILL.md
 ├── tests/                                 bash test suite (fake backend)
 ├── AGENTS.md / CLAUDE.md                  conventions for agents working on this repo
 └── README.md

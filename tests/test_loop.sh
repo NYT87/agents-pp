@@ -614,6 +614,175 @@ assert_contains "auto with dashboard.dirs includes the loop's dir" "$(basename "
 assert_eq "auto with dashboard.dirs scans archive too" "2" "$(printf '%s\n' "$IDS" | grep -c .)"
 echo '{}' > "$R/.claude/review-loop.json"
 
+section "config command"
+C="$S/config.sh"
+R=$(new_repo r24); rm -f "$HOME/.claude/review-loop.json"
+assert_eq "keys lists every key" "9" "$(bash "$C" keys | grep -c .)"
+OUT=$(cd "$R" && bash "$C" show)
+assert_contains "show: missing project file" "review-loop.json (missing)" "$OUT"
+assert_contains "show: backend row shows env value and default" "codex" "$(printf '%s' "$OUT" | grep '^  backend ' | grep 'fake')"
+J=$(cd "$R" && bash "$C" show --json)
+assert_eq "show json: scope project" "project" "$(jq -r .scope <<< "$J")"
+assert_eq "show json: target is project file" "$R/.claude/review-loop.json" "$(jq -r .target <<< "$J")"
+assert_eq "show json: project missing" "false" "$(jq .project.exists <<< "$J")"
+assert_eq "show json: effective default rounds" "5" "$(jq .effective.max_rounds <<< "$J")"
+OUT=$(cd "$R" && bash "$C" set backend=claude model=opus max_rounds=3 usage=yes dashboard.dirs=".review-loop, archive" dashboard.auto=1)
+assert_contains "set reports file" "Updated $R/.claude/review-loop.json" "$OUT"
+F="$R/.claude/review-loop.json"
+assert_eq "set: string" "claude" "$(jq -r .backend "$F")"
+assert_eq "set: integer typed" "3" "$(jq .max_rounds "$F")"
+assert_eq "set: boolean from yes" "true" "$(jq .usage "$F")"
+assert_eq "set: list split and trimmed" '[".review-loop","archive"]' "$(jq -c .dashboard.dirs "$F")"
+assert_eq "set: nested boolean from 1" "true" "$(jq .dashboard.auto "$F")"
+(cd "$R" && bash "$C" set --user max_rounds=7 dir=reviews > /dev/null)
+assert_eq "set --user writes user file" "7" "$(jq .max_rounds "$HOME/.claude/review-loop.json")"
+J=$(cd "$R" && bash "$C" show --json)
+assert_eq "effective: project beats user" "3" "$(jq .effective.max_rounds <<< "$J")"
+assert_eq "effective: user fills gaps" "reviews" "$(jq -r .effective.dir <<< "$J")"
+assert_contains "show prints current values per file" "max_rounds       3                      3                      7" "$(cd "$R" && bash "$C" show)"
+BEFORE=$(cat "$F")
+for bad in backend=nope max_rounds=0 max_rounds=x usage=maybe nokey=1 dir= ; do
+  OUT=$(cd "$R" && bash "$C" set "$bad" 2>&1); RC=$?
+  assert_eq "set rejects $bad" "1" "$RC"
+done
+assert_contains "backend error lists real backends only" "(available: claude codex)" "$(cd "$R" && bash "$C" set backend=nope 2>&1)"
+assert_eq "invalid set leaves file untouched" "$BEFORE" "$(cat "$F")"
+assert_contains "set needs KEY=VALUE" "expected KEY=VALUE" "$(cd "$R" && bash "$C" set backend 2>&1)"
+(cd "$R" && bash "$C" unset model dashboard.auto dashboard.dirs > /dev/null)
+assert_eq "unset removes key" "null" "$(jq .model "$F")"
+assert_eq "unset drops empty dashboard object" "null" "$(jq .dashboard "$F")"
+assert_contains "unset unknown key" "unknown key" "$(cd "$R" && bash "$C" unset nope 2>&1)"
+(cd "$R" && bash "$C" set max_rounds=3 > /dev/null)
+start "$R" "t" > /dev/null; L=$(pointer "$R")
+assert_eq "start.sh picks up the written config" "3" "$(st "$L" max_rounds)"
+assert_contains "start.sh picks up user dir" "/reviews/" "$L"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+
+OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
+assert_contains "gitignore dry-run: pointer" "/.claude/review-loop.active" "$OUT"
+assert_contains "gitignore dry-run: storage dir from user config" "/reviews/" "$OUT"
+assert_no_file "dry-run writes nothing" "$R/.gitignore"
+printf 'reviews/\n' > "$R/.gitignore"
+OUT=$(cd "$R" && bash "$C" gitignore)
+assert_contains "gitignore adds the missing lines" "Added 2 line(s)" "$OUT"
+assert_contains "gitignore adds the default dashboard file" "/reviews/dashboard.html" "$OUT"
+assert_eq "gitignore respects an equivalent existing entry" "1" "$(grep -cE '^/?reviews/?$' "$R/.gitignore")"
+assert_contains "gitignore header" "# review-loop" "$(cat "$R/.gitignore")"
+assert_contains "gitignore idempotent" "already covers" "$(cd "$R" && bash "$C" gitignore)"
+(cd "$R" && bash "$C" set dashboard.out=docs/loops.html dashboard.dirs="archive,$TMP/elsewhere" > /dev/null)
+OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
+assert_contains "gitignore: dashboard out inside root" "/docs/loops.html" "$OUT"
+assert_eq "gitignore: extra dashboard dir without loops adds nothing" "0" "$(printf '%s\n' "$OUT" | grep -c 'archive')"
+assert_not_contains "gitignore: dir outside root skipped" "elsewhere" "$OUT"
+mkdir -p "$R/archive"; cp -R "$L" "$R/archive/"; echo unrelated > "$R/archive/README.md"
+OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
+assert_contains "gitignore: extra dashboard dir offers its loop folder" "/archive/$(basename "$L")/" "$OUT"
+assert_eq "gitignore: extra dashboard dir itself never ignored" "0" "$(printf '%s\n' "$OUT" | grep -cxF '  /archive/')"
+
+R=$(new_repo r26); rm -f "$HOME/.claude/review-loop.json"
+OUT=$(cd "$R" && bash "$C" create)
+assert_contains "create: makes the file" "Created $R/.claude/review-loop.json" "$OUT"
+assert_eq "create: empty object" "{}" "$(jq -c . "$R/.claude/review-loop.json")"
+(cd "$R" && bash "$C" set max_rounds=2 > /dev/null)
+assert_contains "create: existing file untouched" "already exists" "$(cd "$R" && bash "$C" create)"
+assert_eq "create: values preserved" "2" "$(jq .max_rounds "$R/.claude/review-loop.json")"
+OUT=$(cd "$R" && bash "$C" create --user)
+assert_file "create --user" "$HOME/.claude/review-loop.json"; rm -f "$HOME/.claude/review-loop.json"
+start "$R" "seed" > /dev/null; L=$(pointer "$R"); (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+mkdir -p "$R/my reviews"
+(cd "$R" && bash "$C" set dir="my reviews" dashboard.dirs="other dir,arch*ive" > /dev/null)
+mkdir -p "$R/other dir" "$R/arch*ive"
+cp -R "$L" "$R/other dir/"; cp -R "$L" "$R/arch*ive/"
+echo keep > "$R/other dir/notes.md"
+OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
+assert_contains "gitignore: dir with spaces kept whole" "/my reviews/" "$OUT"
+assert_contains "gitignore: default dashboard output under the first dashboard dir" "/other dir/dashboard.html" "$OUT"
+assert_contains "gitignore: scan dir with spaces yields its loop folder only" "/other dir/$(basename "$L")/" "$OUT"
+assert_eq "gitignore: scan dir line absent" "0" "$(printf '%s\n' "$OUT" | grep -cxF '  /other dir/')"
+assert_contains "gitignore: glob characters escaped" "/arch\\*ive/$(basename "$L")/" "$OUT"
+assert_eq "gitignore: glob scan dir itself absent" "0" "$(printf '%s\n' "$OUT" | grep -cxF '  /arch\*ive/')"
+rm -f "$R/.gitignore"; (cd "$R" && bash "$C" gitignore > /dev/null)
+ID=$(basename "$L")
+(cd "$R" && git check-ignore -q --no-index "arch*ive/$ID/state.json") && pass "git ignores the escaped glob dir" || fail "git ignores the escaped glob dir" "$(cat "$R/.gitignore")"
+(cd "$R" && git check-ignore -q --no-index "archXive/$ID/state.json") && fail "git does not ignore a look-alike dir" "matched" || pass "git does not ignore a look-alike dir"
+(cd "$R" && git check-ignore -q --no-index "archive/$ID/state.json") && fail "git does not ignore archive" "matched" || pass "git does not ignore archive"
+(cd "$R" && git check-ignore -q --no-index "other dir/$ID/state.json") && pass "git ignores the loop folder in the spaced dir" || fail "git ignores the loop folder in the spaced dir" "$(cat "$R/.gitignore")"
+(cd "$R" && git check-ignore -q --no-index "other dir/notes.md") && fail "git keeps unrelated files in a scan dir" "ignored" || pass "git keeps unrelated files in a scan dir"
+(cd "$R" && git check-ignore -q --no-index "my reviews/anything") && pass "git ignores the storage dir" || fail "git ignores the storage dir" "$(cat "$R/.gitignore")"
+assert_contains "gitignore: escaped entries are idempotent" "already covers" "$(cd "$R" && bash "$C" gitignore)"
+mkdir -p "$R/[brackets]"; (cd "$R" && bash "$C" set dir="[brackets]" > /dev/null)
+OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
+assert_contains "gitignore: brackets escaped" '/\[brackets\]/' "$OUT"
+(cd "$R" && bash "$C" gitignore > /dev/null)
+(cd "$R" && git check-ignore -q --no-index "[brackets]/x") && pass "git ignores the bracket dir" || fail "git ignores the bracket dir" "$(cat "$R/.gitignore")"
+(cd "$R" && git check-ignore -q --no-index "b/x") && fail "git does not treat brackets as a class" "matched" || pass "git does not treat brackets as a class"
+(cd "$R" && bash "$C" set dir="my reviews" > /dev/null); rm -f "$R/.gitignore"
+(cd "$R" && bash "$C" set dir=.review-loop dashboard.dirs=archive dashboard.out= > /dev/null)
+mkdir -p "$R/archive"
+OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
+assert_contains "gitignore: default dashboard follows first dashboard.dirs entry" "/archive/dashboard.html" "$OUT"
+assert_not_contains "gitignore: not the loop dir's dashboard then" "/.review-loop/dashboard.html" "$OUT"
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+assert_file "gitignore: offered path is where dashboard.sh writes" "$R/archive/dashboard.html"
+(cd "$R" && bash "$C" set dir=. dashboard.dirs= > /dev/null); rm -f "$R/.gitignore"
+OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
+GLOB='/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/'
+assert_contains "gitignore dir=.: loop-id pattern before any loop exists" "$GLOB" "$OUT"
+assert_eq "gitignore dir=.: never ignores the root" "0" "$(printf '%s\n' "$OUT" | grep -cE '^  //?$')"
+assert_contains "gitignore dir=.: root dashboard.html" "/dashboard.html" "$OUT"
+assert_contains "gitignore dir=.: pointer still listed" "/.claude/review-loop.active" "$OUT"
+(cd "$R" && bash "$C" gitignore > /dev/null)
+assert_eq "gitignore dir=.: no bare slash entry" "0" "$(grep -cx '/' "$R/.gitignore")"
+assert_eq "gitignore dir=.: pattern written unescaped" "1" "$(grep -cxF "$GLOB" "$R/.gitignore")"
+start "$R" "t" > /dev/null; L=$(pointer "$R"); (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+(cd "$R" && git check-ignore -q --no-index "$(basename "$L")/state.json") && pass "git ignores a loop created after gitignore ran" || fail "git ignores a loop created after gitignore ran" "$(cat "$R/.gitignore")"
+(cd "$R" && git check-ignore -q --no-index "docs/x") && fail "git keeps ordinary folders at the root" "ignored" || pass "git keeps ordinary folders at the root"
+(cd "$R" && git check-ignore -q --no-index "2026101-120000-abcdef/x") && fail "git keeps near-miss folder names" "ignored" || pass "git keeps near-miss folder names"
+assert_contains "gitignore dir=.: idempotent with the pattern" "already covers" "$(cd "$R" && bash "$C" gitignore)"
+(cd "$R" && bash "$C" unset dir dashboard.dirs > /dev/null)
+
+R=$(new_repo r25); rm -f "$HOME/.claude/review-loop.json"
+OUT=$(cd "$R" && printf 'nope\nclaude\n\nabc\n4\n\nyes\n\n\nno\n\ny\n' | bash "$C" init 2>&1)
+F="$R/.claude/review-loop.json"
+assert_contains "init: creating message" "Creating $F" "$OUT"
+assert_contains "init: shows current value as default" "[fake]:" "$OUT"
+assert_contains "init: invalid backend re-asked" "unknown backend 'nope'" "$OUT"
+assert_eq "init: backend from second answer" "claude" "$(jq -r .backend "$F")"
+assert_contains "init: invalid integer re-asked" "positive integer" "$OUT"
+assert_eq "init: integer from retry" "4" "$(jq .max_rounds "$F")"
+assert_eq "init: usage yes" "true" "$(jq .usage "$F")"
+assert_eq "init: open no" "false" "$(jq .dashboard.open "$F")"
+assert_eq "init: Enter leaves inherited keys unwritten" "null" "$(jq .dir "$F")"
+assert_contains "init: explains unwritten keys" "only the values you set" "$OUT"
+assert_contains "init: gitignore offered last" "Add these to .gitignore?" "$OUT"
+assert_contains "init: gitignore written on y" "/.review-loop/" "$(cat "$R/.gitignore")"
+assert_contains "init: gitignore includes default dashboard file" "/.review-loop/dashboard.html" "$(cat "$R/.gitignore")"
+(cd "$R" && bash "$C" set --user model=opus > /dev/null)
+OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "init: updating message" "Updating $F" "$OUT"
+assert_contains "init: shows inherited value" "[opus]:" "$OUT"
+assert_eq "init: Enter keeps inherited value out of the file" "null" "$(jq .model "$F")"
+assert_eq "init: changed value written" "9" "$(jq .max_rounds "$F")"
+assert_eq "init: untouched value kept" "claude" "$(jq -r .backend "$F")"
+assert_contains "init: gitignore already covered" "already covers" "$OUT"
+(cd "$R" && bash "$C" set model=opus dashboard.out=docs/d.html dashboard.dirs=a,b > /dev/null)
+OUT=$(cd "$R" && printf '\n-\n\n\n\n-\n-\n\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "init: clear hint shown for clearable keys" "(type - to clear)" "$OUT"
+assert_eq "init: - clears model" '""' "$(jq -c .model "$F")"
+assert_eq "init: - clears dashboard.dirs to []" "[]" "$(jq -c .dashboard.dirs "$F")"
+assert_eq "init: - clears dashboard.out" '""' "$(jq -c .dashboard.out "$F")"
+assert_eq "init: cleared model overrides the user file" "" "$(cd "$R" && bash "$C" show --json | jq -r .effective.model)"
+OUT=$(cd "$R" && printf -- '-\n\n-\n-\n5\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "init: - is invalid for backend" "unknown backend '-'" "$OUT"
+assert_contains "init: - is invalid for max_rounds" "positive integer (got '-')" "$OUT"
+assert_eq "init: retry after - works" "5" "$(jq .max_rounds "$F")"
+OUT=$(cd "$R" && bash "$C" init --user --yes)
+assert_contains "init --yes: no prompts" "Wrote $HOME/.claude/review-loop.json" "$OUT"
+assert_eq "init --yes: keeps existing user value" "opus" "$(jq -r .model "$HOME/.claude/review-loop.json")"
+assert_eq "init --yes: existing file untouched for other keys" "null" "$(jq .max_rounds "$HOME/.claude/review-loop.json")"
+rm -f "$HOME/.claude/review-loop.json"
+assert_contains "unknown command" "unknown command" "$(cd "$R" && bash "$C" bogus 2>&1)"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
