@@ -1,0 +1,22 @@
+{
+  "name": "agents-pp",
+  "owner": {
+    "name": "Jose Miguel Navarro"
+  },
+  "metadata": {
+    "description": "Agents Pair Programming: coder/reviewer workflows for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "review-loop",
+      "source": "./plugins/review-loop",
+      "description": "Coder/reviewer loop with pluggable CLI reviewers (Codex, Claude) and an on-disk comment trail per round",
+      "author": {
+        "name": "Jose Miguel Navarro"
+      },
+      "repository": "https://github.com/nyt87/agents-pp",
+      "license": "MIT",
+      "keywords": ["code-review", "codex", "claude", "quality", "automation", "agents"]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "review-loop",
+  "version": "0.1.0",
+  "description": "Coder/reviewer loop: Claude implements a task, an independent CLI reviewer (Codex, Claude, ...) reviews it, and the loop repeats until the reviewer approves. Every round's comments are stored on disk.",
+  "author": {
+    "name": "Jose Miguel Navarro"
+  },
+  "repository": "https://github.com/nyt87/agents-pp",
+  "license": "MIT",
+  "keywords": ["code-review", "codex", "claude", "quality", "automation", "agents"]
+}

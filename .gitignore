@@ -1,0 +1,7 @@
+# review-loop runtime state (when the loop is used inside this repo)
+.review-loop/
+.claude/review-loop.active
+.claude/review-loop.json
+.claude/settings.local.json
+
+.DS_Store

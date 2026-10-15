@@ -1,0 +1,17 @@
+{
+  "description": "review-loop Stop hook: while a loop is active, keep Claude working until the reviewer approves",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/skills/review-loop/scripts/stop-hook.sh\"",
+            "timeout": 30,
+            "statusMessage": "review-loop: checking loop state..."
+          }
+        ]
+      }
+    ]
+  }
+}
