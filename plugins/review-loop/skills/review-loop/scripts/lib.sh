@@ -127,11 +127,12 @@ rl_find_excludes() {
   done
 }
 
-# rl_resolve_config -> JSON with dir, max_rounds, backend, model, usage.
+# rl_resolve_config -> JSON with dir, max_rounds, backend, model, usage,
+# dashboard {dirs, out, open, auto}. Nested objects merge key by key.
 # Precedence (low -> high): defaults, ~/.claude/review-loop.json,
 # ./.claude/review-loop.json, REVIEW_LOOP_* env. Flags are applied by start.sh.
 rl_resolve_config() {
-  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","usage":false}'
+  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false}}'
   local user_cfg="{}" proj_cfg="{}" env_cfg
   if [ -f "$HOME/.claude/review-loop.json" ]; then
     user_cfg=$(jq -c . "$HOME/.claude/review-loop.json" 2>/dev/null) || user_cfg="{}"
@@ -145,12 +146,16 @@ rl_resolve_config() {
     --arg be "${REVIEW_LOOP_BACKEND:-}" \
     --arg model "${REVIEW_LOOP_MODEL:-}" \
     --arg usage "${REVIEW_LOOP_USAGE:-}" \
+    --arg dopen "${REVIEW_LOOP_DASHBOARD_OPEN:-}" \
+    --arg dout "${REVIEW_LOOP_DASHBOARD_OUT:-}" \
     '{}
      + (if $dir   != "" then {dir: $dir} else {} end)
      + (if $mr    != "" then {max_rounds: ($mr | tonumber)} else {} end)
      + (if $be    != "" then {backend: $be} else {} end)
      + (if $model != "" then {model: $model} else {} end)
-     + (if $usage != "" then {usage: ($usage | ascii_downcase | IN("1","true","yes","on"))} else {} end)')
+     + (if $usage != "" then {usage: ($usage | ascii_downcase | IN("1","true","yes","on"))} else {} end)
+     + (if $dopen != "" then {dashboard: {open: ($dopen | ascii_downcase | IN("1","true","yes","on"))}} else {} end)
+     + (if $dout  != "" then {dashboard: {out: $dout}} else {} end)')
   jq -n --argjson d "$defaults" --argjson u "$user_cfg" --argjson p "$proj_cfg" --argjson e "$env_cfg" \
     '$d * $u * $p * $e'
 }
@@ -445,4 +450,15 @@ rl_finalize() {
     '.active = false | .phase = $p | .outcome = $o | .finished_at = $t' || true
   rm -f "$root/$RL_POINTER_REL"
   rl_log "$dir" "finalized: outcome=$outcome phase=$phase"
+  local cfg dargs=() d
+  cfg=$(cd "$root" && rl_resolve_config)
+  if [ "$(jq -r '.dashboard.auto == true' <<< "$cfg")" = "true" ]; then
+    # Scan the configured dirs plus this loop's own storage dir, so a loop
+    # started with --dir elsewhere still shows up (dashboard.sh deduplicates).
+    while IFS= read -r d; do [ -n "$d" ] && dargs+=(--dir "$d"); done \
+      < <(jq -r 'if (.dashboard.dirs | length) > 0 then .dashboard.dirs[] else .dir end' <<< "$cfg")
+    d=$(rl_state_get "$dir" dir); [ -n "$d" ] && dargs+=(--dir "$d")
+    (cd "$root" && REVIEW_LOOP_DASHBOARD_OPEN=0 bash "$RL_SCRIPTS_DIR/dashboard.sh" "${dargs[@]}" > /dev/null 2>&1) \
+      && rl_log "$dir" "dashboard regenerated" || rl_log "$dir" "dashboard regeneration failed"
+  fi
 }

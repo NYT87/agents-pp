@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # review-loop — generate a self-contained HTML dashboard of all review loops.
 #
-# Usage: dashboard.sh [--dir DIR]... [--out FILE] [--open]
-#   --dir DIR   storage dir to scan (repeatable; default: the configured dir)
-#   --out FILE  where to write the page (default: <dir>/dashboard.html)
+# Usage: dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open]
+#   --dir DIR   storage dir to scan (repeatable; default: config dashboard.dirs,
+#               or the configured loop dir)
+#   --out FILE  where to write the page (default: config dashboard.out, or
+#               <dir>/dashboard.html)
 #   --open      open the page in the default browser afterwards
+#   --no-open   do not open it (default comes from config dashboard.open, true)
+# Config (.claude/review-loop.json or ~/.claude/review-loop.json):
+#   {"dashboard": {"dirs": [".review-loop"], "out": "docs/loops.html",
+#                  "open": true, "auto": false}}
+#   "auto": true regenerates the page every time a loop ends.
+# Env: REVIEW_LOOP_DASHBOARD_OPEN=0|1, REVIEW_LOOP_DASHBOARD_OUT=FILE
 #
 # The page embeds every loop's state, task, coder summaries, reviews and
 # summary as JSON and renders them with no network access needed.
@@ -14,7 +22,7 @@ set -euo pipefail
 
 command -v jq > /dev/null 2>&1 || rl_die "'jq' is required"
 
-DIRS=() OUT="" OPEN=0
+DIRS=() OUT="" OPEN=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIRS+=("${2:-}"); shift 2 ;;
@@ -22,15 +30,20 @@ while [ $# -gt 0 ]; do
     --out) OUT="${2:-}"; shift 2 ;;
     --out=*) OUT="${1#*=}"; shift ;;
     --open) OPEN=1; shift ;;
-    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-open) OPEN=0; shift ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) rl_die "unknown argument '$1'" ;;
   esac
 done
 
 ROOT="$PWD"
+CFG=$(rl_resolve_config)
 if [ "${#DIRS[@]}" -eq 0 ]; then
-  DIRS=("$(rl_resolve_config | jq -r .dir)")
+  while IFS= read -r d; do [ -n "$d" ] && DIRS+=("$d"); done < <(jq -r '.dashboard.dirs[]? // empty' <<< "$CFG")
+  [ "${#DIRS[@]}" -gt 0 ] || DIRS=("$(jq -r .dir <<< "$CFG")")
 fi
+[ -n "$OUT" ] || OUT=$(jq -r '.dashboard.out // ""' <<< "$CFG")
+[ -n "$OPEN" ] || OPEN=$(jq -r 'if .dashboard.open == false then 0 else 1 end' <<< "$CFG")
 TEMPLATE="$RL_TEMPLATES_DIR/dashboard.html"
 [ -f "$TEMPLATE" ] || rl_die "template missing: $TEMPLATE"
 

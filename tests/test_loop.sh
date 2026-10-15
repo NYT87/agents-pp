@@ -12,7 +12,8 @@ trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME/.claude"
 export REVIEW_LOOP_BACKEND=fake
 export REVIEW_LOOP_FAKE_FILE="$TMP/verdicts"
-unset REVIEW_LOOP_DIR REVIEW_LOOP_MAX_ROUNDS REVIEW_LOOP_MODEL REVIEW_LOOP_NESTED
+unset REVIEW_LOOP_DIR REVIEW_LOOP_MAX_ROUNDS REVIEW_LOOP_MODEL REVIEW_LOOP_NESTED REVIEW_LOOP_DASHBOARD_OUT
+export REVIEW_LOOP_DASHBOARD_OPEN=0   # never launch a browser from the tests
 
 pass() { PASS=$((PASS + 1)); echo "  ok   $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  FAIL $1: $2"; }
@@ -561,6 +562,57 @@ assert_eq "3 MB trail still generates" "0" "$RC"
 assert_contains "3 MB trail counted" "2 loop(s)" "$OUT"
 J=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
 assert_eq "3 MB summary embedded intact" "3000000" "$(printf '%s' "$J" | jq '[.loops[] | select(.state.loop_id == "'"$(basename "$L2")"'")][0].files[0].coder | length')"
+
+section "dashboard config"
+R=$(new_repo r23)
+mkdir -p "$R/.claude" "$R/archive"
+start "$R" "task" > /dev/null; L=$(pointer "$R"); (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+cp -R "$L" "$R/archive/"
+echo '{"dashboard": {"dirs": [".review-loop", "archive"], "out": "docs/loops.html"}}' > "$R/.claude/review-loop.json"
+OUT=$(cd "$R" && bash "$S/dashboard.sh")
+assert_contains "config dirs scanned" "2 loop(s) from .review-loop archive" "$OUT"
+assert_file "config out used" "$R/docs/loops.html"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --dir archive --out custom.html)
+assert_contains "flags override config dirs" "1 loop(s) from archive" "$OUT"
+assert_file "flags override config out" "$R/custom.html"
+OUT=$(cd "$R" && REVIEW_LOOP_DASHBOARD_OUT=env.html bash "$S/dashboard.sh")
+assert_file "env overrides config out" "$R/env.html"
+mkdir -p "$TMP/fakebin"; printf '#!/bin/sh\necho "OPENED $1" > "%s/opened.txt"\n' "$TMP" > "$TMP/fakebin/open"; chmod +x "$TMP/fakebin/open"
+rm -f "$TMP/opened.txt"
+(cd "$R" && PATH="$TMP/fakebin:$PATH" REVIEW_LOOP_DASHBOARD_OPEN= bash "$S/dashboard.sh" > /dev/null)
+assert_file "open defaults to true from config" "$TMP/opened.txt"
+rm -f "$TMP/opened.txt"
+(cd "$R" && PATH="$TMP/fakebin:$PATH" REVIEW_LOOP_DASHBOARD_OPEN= bash "$S/dashboard.sh" --no-open > /dev/null)
+assert_no_file "--no-open wins" "$TMP/opened.txt"
+echo '{"dashboard": {"open": false}}' > "$R/.claude/review-loop.json"
+(cd "$R" && PATH="$TMP/fakebin:$PATH" REVIEW_LOOP_DASHBOARD_OPEN= bash "$S/dashboard.sh" > /dev/null)
+assert_no_file "config open:false respected" "$TMP/opened.txt"
+(cd "$R" && PATH="$TMP/fakebin:$PATH" REVIEW_LOOP_DASHBOARD_OPEN= bash "$S/dashboard.sh" --open > /dev/null)
+assert_file "--open overrides config" "$TMP/opened.txt"
+rm -f "$TMP/opened.txt"
+echo '{"dashboard": {"auto": true, "out": "auto.html"}}' > "$R/.claude/review-loop.json"
+rm -f "$R/auto.html"
+start "$R" "task2" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"; coder "$L" 1; verdicts approved
+(cd "$R" && PATH="$TMP/fakebin:$PATH" REVIEW_LOOP_DASHBOARD_OPEN= bash "$S/review.sh" > /dev/null)
+assert_file "auto regenerates on loop end" "$R/auto.html"
+assert_no_file "auto never opens a browser" "$TMP/opened.txt"
+assert_contains "auto logged" "dashboard regenerated" "$(cat "$L/loop.log")"
+rm -f "$R/auto.html"; start "$R" "task3" > /dev/null; (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+assert_file "auto regenerates on cancel" "$R/auto.html"
+echo '{}' > "$R/.claude/review-loop.json"; rm -f "$R/auto.html"
+start "$R" "task4" > /dev/null; (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+assert_no_file "auto off by default" "$R/auto.html"
+dash_ids() { sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$1" | jq -r '.loops[].state.loop_id'; }
+echo '{"dashboard": {"auto": true, "out": "auto.html"}}' > "$R/.claude/review-loop.json"; rm -f "$R/auto.html"
+start "$R" --dir custom "task5" > /dev/null; L=$(pointer "$R"); (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+assert_contains "auto includes a loop stored with --dir" "$(basename "$L")" "$(dash_ids "$R/auto.html")"
+assert_eq "auto still includes the default dir (4 loops) plus custom" "5" "$(dash_ids "$R/auto.html" | grep -c .)"
+echo '{"dashboard": {"auto": true, "out": "auto.html", "dirs": ["archive"]}}' > "$R/.claude/review-loop.json"; rm -f "$R/auto.html"
+start "$R" --dir custom2 "task6" > /dev/null; L=$(pointer "$R"); (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+IDS=$(dash_ids "$R/auto.html")
+assert_contains "auto with dashboard.dirs includes the loop's dir" "$(basename "$L")" "$IDS"
+assert_eq "auto with dashboard.dirs scans archive too" "2" "$(printf '%s\n' "$IDS" | grep -c .)"
+echo '{}' > "$R/.claude/review-loop.json"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
