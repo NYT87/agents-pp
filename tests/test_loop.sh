@@ -518,6 +518,50 @@ assert_contains "non-git root loops: real change detected" "round-01-coder.md" "
 coder "$L2" 1; verdicts approved; review "$R" > /dev/null
 assert_contains "non-git prompt excludes old loop dir" "-not -path './$(basename "$L1")/*'" "$(cat "$L2/round-01-prompt.md")"
 
+section "dashboard"
+R=$(new_repo r22)
+OUT=$(cd "$R" && bash "$S/dashboard.sh")
+assert_contains "dashboard with no loops" "0 loop(s)" "$OUT"
+assert_file "dashboard written even when empty" "$R/.review-loop/dashboard.html"
+start "$R" --usage "task one </script><script>alert(1)</script>" > /dev/null; L1=$(pointer "$R"); echo x > "$R/f"
+coder "$L1" 1; verdicts changes_requested approved; review "$R" > /dev/null; coder "$L1" 2; review "$R" > /dev/null
+jq '.started_at = "2020-01-01T00:00:00Z"' "$L1/state.json" > "$L1/s.tmp" && mv "$L1/s.tmp" "$L1/state.json"
+start "$R" "task two" > /dev/null; L2=$(pointer "$R")
+mkdir -p "$R/.review-loop/20261015-120000-abcdef"; echo notaloop > "$R/.review-loop/20261015-120000-abcdef/x"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --out out/dash.html)
+assert_contains "dashboard counts loops" "2 loop(s)" "$OUT"
+assert_file "dashboard custom out path" "$R/out/dash.html"
+H=$(cat "$R/out/dash.html")
+assert_contains "dashboard embeds loop ids" "$(basename "$L1")" "$H"
+assert_contains "dashboard embeds second loop" "$(basename "$L2")" "$H"
+assert_not_contains "dashboard skips non-loop folder" "20261015-120000-abcdef" "$H"
+assert_not_contains "script tag in task is escaped" "</script><script>alert" "$H"
+J=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/out/dash.html")
+assert_eq "embedded data is valid JSON with 2 loops" "2" "$(printf '%s' "$J" | jq '.loops | length')"
+assert_eq "embedded rounds carry usage" "1000" "$(printf '%s' "$J" | jq '[.loops[] | select(.state.loop_id == "'"$(basename "$L1")"'")][0].state.rounds[0].reviewer.input_tokens')"
+assert_eq "embedded files carry review text" "true" "$(printf '%s' "$J" | jq '[.loops[] | select(.state.loop_id == "'"$(basename "$L1")"'")][0].files[0].review | contains("verdict: changes_requested")')"
+assert_eq "newest loop first" "$(basename "$L2")" "$(printf '%s' "$J" | jq -r '.loops[0].state.loop_id')"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --dir .review-loop --dir nowhere)
+assert_contains "missing --dir tolerated" "2 loop(s)" "$OUT"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --dir .review-loop --dir ./.review-loop/ --dir "$R/.review-loop")
+assert_contains "repeated --dir counted once" "2 loop(s)" "$OUT"
+J=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "repeated --dir embeds each loop once" "2" "$(printf '%s' "$J" | jq '.loops | length')"
+ln -s "$R/.review-loop" "$R/reviews-link"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --dir .review-loop --dir reviews-link)
+assert_contains "symlinked --dir counted once" "2 loop(s)" "$OUT"
+J=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "symlinked --dir embeds each loop once" "2" "$(printf '%s' "$J" | jq '.loops | length')"
+assert_eq "first path seen is kept" "$R/.review-loop" "$(printf '%s' "$J" | jq -r '.loops[0].dir' | xargs dirname)"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --dir reviews-link)
+assert_contains "symlinked dir alone works" "2 loop(s)" "$OUT"
+head -c 3000000 /dev/zero | tr '\0' 'a' > "$L2/round-01-coder.md"
+OUT=$(cd "$R" && bash "$S/dashboard.sh"); RC=$?
+assert_eq "3 MB trail still generates" "0" "$RC"
+assert_contains "3 MB trail counted" "2 loop(s)" "$OUT"
+J=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "3 MB summary embedded intact" "3000000" "$(printf '%s' "$J" | jq '[.loops[] | select(.state.loop_id == "'"$(basename "$L2")"'")][0].files[0].coder | length')"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

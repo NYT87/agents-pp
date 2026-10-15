@@ -38,7 +38,7 @@ Or, from a local checkout, for one session:
 claude --plugin-dir ./plugins/review-loop
 ```
 
-Skills are then available as `/review-loop:review-loop`, `/review-loop:review-status` and `/review-loop:review-cancel`.
+Skills are then available as `/review-loop:review-loop`, `/review-loop:review-status`, `/review-loop:review-cancel` and `/review-loop:review-dashboard`.
 
 ### As a standalone skill (no plugin)
 
@@ -46,9 +46,10 @@ Skills are then available as `/review-loop:review-loop`, `/review-loop:review-st
 cp -r plugins/review-loop/skills/review-loop   ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-status ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-cancel ~/.claude/skills/
+cp -r plugins/review-loop/skills/review-dashboard ~/.claude/skills/
 ```
 
-Skills are then `/review-loop`, `/review-status`, `/review-cancel`. In this mode the loop is driven by the skill's instructions alone. To get the same Stop-hook enforcement as the plugin, add to `~/.claude/settings.json`:
+Skills are then `/review-loop`, `/review-status`, `/review-cancel`, `/review-dashboard`. In this mode the loop is driven by the skill's instructions alone. To get the same Stop-hook enforcement as the plugin, add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -123,6 +124,15 @@ Where the numbers come from:
 - **Coder** (your Claude Code session): the session transcript (`~/.claude/projects/<project>/<session>.jsonl`), summing assistant messages since the loop started, deduplicated by message id. The Stop hook passes the transcript path; without the hook the skill passes `${CLAUDE_SESSION_ID}` to `start.sh` so the transcript is found by session id. The coder numbers cover everything the session did during the loop, not only this task.
 
 Backends report usage through an optional sidecar file (see "Reviewer backends"), only when `REVIEW_LOOP_USAGE=1` is set by `review.sh`. A backend without one records zeros. When tracking is off, nothing reads transcripts or sidecars and the Codex backend runs in its plain streaming mode.
+
+### Dashboard
+
+```
+/review-dashboard
+bash plugins/review-loop/skills/review-loop/scripts/dashboard.sh [--dir DIR]... [--out FILE] [--open]
+```
+
+Generates a self-contained `dashboard.html` (default: inside the storage dir) from every loop folder it finds and opens it in your browser. No server, no network: the loop data is embedded in the page. It shows stat tiles (loops, approval rate, average rounds, tokens and cost when usage tracking is on), a rounds-per-loop chart with the cap marked, an output-tokens-per-loop chart split by coder and reviewer, a filterable table, and, on click, the full comment trail of a loop round by round: coder summary beside the review, verdict, blocking count, usage, and the final summary. It follows the system light/dark setting and has a theme toggle.
 
 ## Configuration
 
@@ -202,11 +212,12 @@ agents-pp/
 │   └── skills/
 │       ├── review-loop/                   self-contained skill (copy this dir for standalone use)
 │       │   ├── SKILL.md
-│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, status.sh, cancel.sh
+│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, status.sh, cancel.sh, dashboard.sh
 │       │   ├── scripts/backends/          codex.sh, claude.sh, fake.sh
-│       │   └── templates/                 reviewer-prompt.md, coder-summary.md, review-format.md
+│       │   └── templates/                 reviewer-prompt.md, coder-summary.md, review-format.md, dashboard.html
 │       ├── review-status/SKILL.md
-│       └── review-cancel/SKILL.md
+│       ├── review-cancel/SKILL.md
+│       └── review-dashboard/SKILL.md
 ├── tests/                                 bash test suite (fake backend)
 ├── AGENTS.md / CLAUDE.md                  conventions for agents working on this repo
 └── README.md
@@ -215,7 +226,7 @@ agents-pp/
 ## Development
 
 ```bash
-bash tests/run.sh                          # 150+ state-machine tests, plus shellcheck when installed
+bash tests/run.sh                          # 230+ state-machine tests, plus shellcheck when installed
 claude --plugin-dir ./plugins/review-loop  # try the plugin from this checkout
 ```
 

@@ -14,6 +14,7 @@ runtime deps are `jq` and optionally `git`.
 - `scripts/stop-hook.sh` — Claude Code Stop hook; enforcement only, no transitions.
 - `scripts/backends/*.sh` — one reviewer CLI adapter each; contract in README "Backends".
 - `templates/*.md` — reviewer prompt and the file formats both agents must follow.
+- `scripts/dashboard.sh` + `templates/dashboard.html` — static dashboard generator; the template gets the loop data substituted into `{{DATA}}` (with `</` escaped) and renders everything client-side with no external resources.
 - `tests/test_loop.sh` — plain-bash suite driving the scripts with the `fake` backend.
 
 ## Rules

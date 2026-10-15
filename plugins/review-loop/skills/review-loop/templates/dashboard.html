@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review loops</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #eb6834;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --hover: rgba(11,11,11,0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #d95926; --hover: rgba(255,255,255,0.06);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --hover: rgba(255,255,255,0.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--s1); }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+  header h1 { font-size: 20px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 12px; flex-basis: 100%; order: 3; word-break: break-all; }
+  header .spacer { flex: 1; }
+  button, select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover, select:hover { background: var(--hover); }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px; font-size: 13px; color: var(--ink-2); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .label { color: var(--muted); font-size: 12px; }
+  .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  .tile .sub { color: var(--ink-2); font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 4px; }
+  .card .hint { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  svg { display: block; width: 100%; height: auto; }
+  svg text { font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--ink-2); }
+  svg .tick { font-variant-numeric: tabular-nums; fill: var(--muted); font-size: 11px; }
+  svg .gridline { stroke: var(--grid); stroke-width: 1; }
+  svg .baseline { stroke: var(--axis); stroke-width: 1; }
+  svg .bar { cursor: pointer; }
+  svg .bar:hover { opacity: 0.85; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--hover); }
+  tbody tr.selected { background: var(--hover); outline: 1px solid var(--border); }
+  .task { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .chip.good i { background: var(--good); } .chip.serious i { background: var(--serious); }
+  .chip.critical i { background: var(--critical); } .chip.warning i { background: var(--warning); }
+  .chip.active i { background: var(--s1); } .chip.neutral i { background: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  #tooltip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); display: none; z-index: 10; max-width: 320px; }
+  /* detail */
+  #detail { margin-top: 20px; }
+  .detail-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 6px; }
+  .detail-head h2 { margin: 0; font-size: 16px; }
+  .kv { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; margin-bottom: 12px; }
+  .kv b { color: var(--ink); font-weight: 500; }
+  .round { border-top: 1px solid var(--grid); padding-top: 12px; margin-top: 12px; }
+  .round h3 { font-size: 14px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  .doc { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; overflow: auto; max-height: 520px; }
+  .doc .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+  .md h1, .md h2, .md h3, .md h4 { font-size: 13px; margin: 12px 0 4px; }
+  .md h1 { font-size: 15px; } .md h2 { font-size: 14px; }
+  .md p { margin: 6px 0; } .md ul, .md ol { margin: 4px 0 6px; padding-left: 20px; }
+  .md li { margin: 1px 0; }
+  .md pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
+  .md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--surface); padding: 0 4px; border-radius: 4px; }
+  .md pre code { background: none; padding: 0; }
+  .md table { font-size: 12px; margin: 6px 0; } .md th, .md td { padding: 4px 8px; }
+  .md .front { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+  .md .front span b { color: var(--ink); font-weight: 500; }
+  .md .verdict { font-weight: 600; }
+  .md .cid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface); padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); }
+  .md blockquote { border-left: 3px solid var(--axis); margin: 6px 0; padding-left: 10px; color: var(--ink-2); }
+  .usage-table { margin-top: 10px; }
+  @media (max-width: 640px) { .task { max-width: 200px; } th.opt, td.opt { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Review loops</h1>
+    <span class="meta" id="meta"></span>
+    <span class="spacer"></span>
+    <button id="theme" type="button" title="Toggle theme">Theme</button>
+  </header>
+
+  <div class="filters">
+    <label>Outcome <select id="f-outcome"><option value="">all</option></select></label>
+    <label>Backend <select id="f-backend"><option value="">all</option></select></label>
+    <span id="f-count"></span>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Rounds per loop</h2>
+      <div class="hint">Review rounds until the loop ended. The cap is shown as a faint marker.</div>
+      <div id="chart-rounds"></div>
+    </div>
+    <div class="card" id="card-tokens">
+      <h2>Tokens per loop</h2>
+      <div class="hint">Output tokens by agent, loops with usage tracking only. Input and cache figures are in the loop detail.</div>
+      <div class="legend"><span><i style="background:var(--s1)"></i>coder</span><span><i style="background:var(--s2)"></i>reviewer</span></div>
+      <div id="chart-tokens"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Loops</h2>
+    <div class="hint">Click a row to see the full comment trail.</div>
+    <div style="overflow:auto">
+    <table id="loops">
+      <thead><tr>
+        <th>Started</th><th>Task</th><th>Outcome</th><th class="num">Rounds</th><th class="opt">Backend</th><th class="num opt">Duration</th><th class="num opt">Cost</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div id="detail"></div>
+</div>
+<div id="tooltip"></div>
+
+<script id="rl-data" type="application/json">{{DATA}}</script>
+<script>
+(function () {
+  'use strict';
+  const DATA = JSON.parse(document.getElementById('rl-data').textContent);
+  const $ = (s, el) => (el || document).querySelector(s);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtNum = n => n == null ? '–' : Number(n).toLocaleString();
+  const fmtCost = c => c == null ? '–' : '$' + Number(c).toFixed(c < 0.1 ? 4 : 2);
+  const fmtDur = s => s == null ? '–' : s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : (s / 3600).toFixed(1) + 'h';
+  const fmtDate = iso => { if (!iso) return '–'; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); };
+
+  // ── theme ────────────────────────────────────────────────────────────────
+  const root = document.documentElement;
+  try { const t = localStorage.getItem('rl-theme'); if (t) root.dataset.theme = t; } catch (e) {}
+  $('#theme').onclick = () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('rl-theme', root.dataset.theme); } catch (e) {}
+    render();
+  };
+
+  // ── derive ───────────────────────────────────────────────────────────────
+  const OUTCOME = {
+    approved: ['good', 'Approved'], max_rounds_reached: ['serious', 'Max rounds'], cancelled: ['neutral', 'Cancelled'],
+    no_work: ['critical', 'No work'], review_not_run: ['critical', 'Reviewer not run'], hook_error: ['critical', 'Hook error'],
+    active: ['active', 'Active'], paused: ['warning', 'Paused'], failed: ['critical', 'Failed']
+  };
+  const sumUsage = (rows, key) => rows.reduce((acc, r) => {
+    const u = r[key]; if (!u) return acc;
+    for (const k of ['input_tokens', 'cached_input_tokens', 'cache_write_tokens', 'output_tokens', 'reasoning_tokens']) acc[k] = (acc[k] || 0) + (u[k] || 0);
+    if (u.cost_usd != null) acc.cost_usd = (acc.cost_usd || 0) + u.cost_usd;
+    acc.any = true; return acc;
+  }, {});
+  const loops = DATA.loops.map(l => {
+    const st = l.state || {};
+    const rounds = Array.isArray(st.rounds) ? st.rounds : [];
+    const roundCount = Math.max(rounds.length, l.files.filter(f => f.review).length, 0);
+    const outcome = st.active ? (st.phase === 'paused' ? 'paused' : 'active') : (st.outcome || st.phase || 'failed');
+    const start = Date.parse(st.started_at), end = Date.parse(st.finished_at);
+    const duration = (!isNaN(start) && !isNaN(end)) ? Math.round((end - start) / 1000) : null;
+    const coder = sumUsage(rounds, 'coder'), reviewer = sumUsage(rounds, 'reviewer');
+    const cost = (coder.cost_usd != null || reviewer.cost_usd != null) ? (coder.cost_usd || 0) + (reviewer.cost_usd || 0) : null;
+    return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), st, rounds, roundCount, outcome, duration, coder, reviewer, cost, files: l.files, summary: l.summary, usage: !!st.usage || rounds.some(r => r.reviewer || r.coder) };
+  });
+
+  // ── filters ──────────────────────────────────────────────────────────────
+  const fo = $('#f-outcome'), fb = $('#f-backend');
+  [...new Set(loops.map(l => l.outcome))].sort().forEach(o => fo.insertAdjacentHTML('beforeend', `<option value="${esc(o)}">${esc((OUTCOME[o] || ['', o])[1])}</option>`));
+  [...new Set(loops.map(l => l.st.backend).filter(Boolean))].sort().forEach(b => fb.insertAdjacentHTML('beforeend', `<option value="${esc(b)}">${esc(b)}</option>`));
+  fo.onchange = fb.onchange = render;
+  let selected = null;
+  const visible = () => loops.filter(l => (!fo.value || l.outcome === fo.value) && (!fb.value || l.st.backend === fb.value));
+
+  // ── tooltip ──────────────────────────────────────────────────────────────
+  const tip = $('#tooltip');
+  const showTip = (e, html) => { tip.innerHTML = html; tip.style.display = 'block'; moveTip(e); };
+  const moveTip = e => { const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8); tip.style.left = x + 'px'; tip.style.top = (e.clientY + 14) + 'px'; };
+  const hideTip = () => { tip.style.display = 'none'; };
+
+  // ── charts ───────────────────────────────────────────────────────────────
+  const chip = o => { const [cls, label] = OUTCOME[o] || ['neutral', o]; return `<span class="chip ${cls}"><i></i>${esc(label)}</span>`; };
+  const ns = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; return n; };
+  // Horizontal bar with a 4px rounded data end, anchored to the baseline.
+  const barPath = (x0, y, w, h, r) => { if (w <= 0) return ''; r = Math.min(r, w, h / 2); const x1 = x0 + w; return `M${x0},${y} H${x1 - r} a${r},${r} 0 0 1 ${r},${r} V${y + h - r} a${r},${r} 0 0 1 -${r},${r} H${x0} Z`; };
+
+  function barChart(container, rows, opts) {
+    container.innerHTML = '';
+    if (!rows.length) { container.innerHTML = '<div class="empty">Nothing to show.</div>'; return; }
+    const W = 600, labelW = 240, rowH = 22, padT = 18, padB = 22, barH = 12;
+    const H = padT + rows.length * rowH + padB;
+    const max = Math.max(1, ...rows.map(r => r.segments.reduce((a, s) => a + s.value, 0)), opts.max || 0);
+    const x = v => labelW + v / max * (W - labelW - 16);
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': opts.label });
+    const ticks = niceTicks(max, 4);
+    ticks.forEach(t => { svg.appendChild(el('line', { x1: x(t), x2: x(t), y1: padT - 6, y2: H - padB, class: 'gridline' })); svg.appendChild(el('text', { x: x(t), y: H - 6, 'text-anchor': 'middle', class: 'tick' }, fmtNum(t))); });
+    svg.appendChild(el('line', { x1: labelW, x2: labelW, y1: padT - 6, y2: H - padB, class: 'baseline' }));
+    rows.forEach((r, i) => {
+      const y = padT + i * rowH + (rowH - barH) / 2;
+      const t = el('text', { x: labelW - 8, y: y + barH - 2, 'text-anchor': 'end' }, r.label);
+      t.style.cursor = 'pointer'; t.onclick = () => select(r.id); svg.appendChild(t);
+      let acc = 0;
+      r.segments.forEach((s, j) => {
+        const w = s.value / max * (W - labelW - 16);
+        const gap = j > 0 && w > 0 ? 2 : 0;
+        const p = el('path', { d: barPath(x(acc) + gap, y, Math.max(0, w - gap), barH, 4), fill: s.color, class: 'bar' });
+        p.onmousemove = e => showTip(e, r.tip(s)); p.onmouseleave = hideTip; p.onclick = () => select(r.id);
+        svg.appendChild(p); acc += s.value;
+      });
+      if (r.marker != null) svg.appendChild(el('line', { x1: x(r.marker), x2: x(r.marker), y1: y - 2, y2: y + barH + 2, stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '2 2' }));
+      if (r.end) svg.appendChild(el('text', { x: x(acc) + 6, y: y + barH - 2 }, r.end));
+    });
+    container.appendChild(svg);
+  }
+  function niceTicks(max, n) { const raw = max / n, p = Math.pow(10, Math.floor(Math.log10(raw))); const step = [1, 2, 5, 10].map(m => m * p).find(s => s >= raw) || p; const out = []; for (let v = 0; v <= max + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000); return out; }
+
+  // ── markdown (tiny, no network) ──────────────────────────────────────────
+  function md(src) {
+    const lines = String(src || '').replace(/\r/g, '').split('\n');
+    let out = '', i = 0, front = null;
+    if (lines[0] === '---') { const end = lines.indexOf('---', 1); if (end > 0) { front = lines.slice(1, end); i = end + 1; } }
+    if (front) out += '<div class="front">' + front.map(l => { const m = l.match(/^([^:]+):\s*(.*)$/); return m ? `<span><b>${esc(m[1])}</b> ${esc(m[2])}</span>` : esc(l); }).join('') + '</div>';
+    const inline = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\b(R\d+-C\d+)\b/g, '<span class="cid">$1</span>').replace(/^(VERDICT:\s*\w+)$/i, '<span class="verdict">$1</span>');
+    let para = [];
+    const flush = () => { if (para.length) { out += '<p>' + para.map(inline).join(' ') + '</p>'; para = []; } };
+    while (i < lines.length) {
+      const l = lines[i];
+      if (/^\s*```/.test(l)) { flush(); let code = []; i++; while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]); i++; out += '<pre><code>' + esc(code.join('\n')) + '</code></pre>'; continue; }
+      const h = l.match(/^(#{1,4})\s+(.*)$/); if (h) { flush(); out += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; i++; continue; }
+      if (/^\s*[-*]\s+/.test(l)) { flush(); out += '<ul>'; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) out += '<li>' + inline(lines[i++].replace(/^\s*[-*]\s+/, '')) + '</li>'; out += '</ul>'; continue; }
+      if (/^\s*\d+\.\s+/.test(l)) { flush(); out += '<ol>'; while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) out += '<li>' + inline(lines[i++].replace(/^\s*\d+\.\s+/, '')) + '</li>'; out += '</ol>'; continue; }
+      if (/^\s*\|/.test(l)) { flush(); const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]); const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()); const body = rows.filter(r => !/^\s*\|?\s*:?-+/.test(r)); out += '<table>' + body.map((r, k) => '<tr>' + cells(r).map(c => `<${k === 0 ? 'th' : 'td'}>${inline(c)}</${k === 0 ? 'th' : 'td'}>`).join('') + '</tr>').join('') + '</table>'; continue; }
+      if (/^\s*>/.test(l)) { flush(); out += '<blockquote>' + inline(l.replace(/^\s*>\s?/, '')) + '</blockquote>'; i++; continue; }
+      if (/^\s*$/.test(l)) { flush(); i++; continue; }
+      para.push(l); i++;
+    }
+    flush();
+    return out;
+  }
+
+  // ── render ───────────────────────────────────────────────────────────────
+  function usageRows(label, u) {
+    if (!u || !u.any) return '';
+    return `<tr><td>${esc(label)}</td><td class="num">${fmtNum(u.input_tokens)}</td><td class="num">${fmtNum(u.cached_input_tokens)}</td><td class="num">${fmtNum(u.cache_write_tokens)}</td><td class="num">${fmtNum(u.output_tokens)}</td><td class="num">${fmtNum(u.reasoning_tokens)}</td><td class="num">${fmtCost(u.cost_usd)}</td></tr>`;
+  }
+  function render() {
+    const rows = visible();
+    $('#meta').textContent = `${DATA.root} · generated ${fmtDate(DATA.generated_at)}`;
+    $('#f-count').textContent = `${rows.length} of ${loops.length} loop${loops.length === 1 ? '' : 's'}`;
+
+    // tiles
+    const done = rows.filter(l => !l.st.active);
+    const approved = done.filter(l => l.outcome === 'approved').length;
+    const avgRounds = rows.length ? (rows.reduce((a, l) => a + l.roundCount, 0) / rows.length) : 0;
+    const withUsage = rows.filter(l => l.usage);
+    const outTok = withUsage.reduce((a, l) => a + (l.coder.output_tokens || 0) + (l.reviewer.output_tokens || 0), 0);
+    const cost = withUsage.reduce((a, l) => a + (l.cost || 0), 0);
+    const anyCost = withUsage.some(l => l.cost != null);
+    $('#tiles').innerHTML = [
+      ['Loops', rows.length, `${rows.filter(l => l.st.active).length} active`],
+      ['Approval rate', done.length ? Math.round(approved / done.length * 100) + '%' : '–', `${approved} of ${done.length} finished`],
+      ['Avg rounds', rows.length ? avgRounds.toFixed(1) : '–', `max ${Math.max(0, ...rows.map(l => l.roundCount))}`],
+      ['Output tokens', withUsage.length ? fmtNum(outTok) : '–', withUsage.length ? `${withUsage.length} loop${withUsage.length === 1 ? '' : 's'} with usage` : 'enable with --usage'],
+      ['Cost', anyCost ? fmtCost(cost) : '–', anyCost ? 'reviewer cost where reported' : 'no cost data'],
+    ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join('');
+
+    // charts
+    const short = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+    const label = l => `${short(l.st.started_at)} · ${(l.task.length > 17 ? l.task.slice(0, 16) + '…' : l.task) || l.id}`;
+    barChart($('#chart-rounds'), rows.slice(0, 25).map(l => ({
+      id: l.id, label: label(l), marker: l.st.max_rounds, end: `${l.roundCount}/${l.st.max_rounds || '?'}`,
+      segments: [{ value: l.roundCount, color: 'var(--s1)' }],
+      tip: () => `<b>${esc(l.task)}</b><br>${chip(l.outcome)} · ${l.roundCount} of ${l.st.max_rounds} rounds · ${esc(l.st.backend)}`
+    })), { label: 'Rounds per loop', max: Math.max(0, ...rows.map(l => l.st.max_rounds || 0)) });
+    const tokRows = rows.filter(l => l.usage && ((l.coder.output_tokens || 0) + (l.reviewer.output_tokens || 0)) > 0).slice(0, 25);
+    $('#card-tokens').style.display = '';
+    barChart($('#chart-tokens'), tokRows.map(l => ({
+      id: l.id, label: label(l),
+      segments: [{ name: 'coder', value: l.coder.output_tokens || 0, color: 'var(--s1)' }, { name: 'reviewer', value: l.reviewer.output_tokens || 0, color: 'var(--s2)' }],
+      tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${fmtNum(s.value)} output tokens<br>coder ${fmtNum(l.coder.output_tokens)} · reviewer ${fmtNum(l.reviewer.output_tokens)}${l.cost != null ? ' · ' + fmtCost(l.cost) : ''}`
+    })), { label: 'Output tokens per loop' });
+
+    // table
+    $('#loops tbody').innerHTML = rows.map(l => `<tr data-id="${esc(l.id)}" class="${l.id === selected ? 'selected' : ''}">
+      <td class="mono">${esc(fmtDate(l.st.started_at))}</td>
+      <td><div class="task" title="${esc(l.task)}">${esc(l.task)}</div></td>
+      <td>${chip(l.outcome)}</td>
+      <td class="num">${l.roundCount} / ${l.st.max_rounds || '?'}</td>
+      <td class="opt">${esc(l.st.backend)}${l.st.model ? ' <span class="mono">' + esc(l.st.model) + '</span>' : ''}</td>
+      <td class="num opt">${fmtDur(l.duration)}</td>
+      <td class="num opt">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No loops match.</td></tr>';
+    document.querySelectorAll('#loops tbody tr[data-id]').forEach(tr => tr.onclick = () => select(tr.dataset.id));
+    renderDetail();
+  }
+
+  function select(id) {
+    selected = id === selected ? null : id;
+    try { history.replaceState(null, '', selected ? '#' + selected : location.pathname); } catch (e) {}
+    render();
+    if (selected) $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function renderDetail() {
+    const l = loops.find(x => x.id === selected);
+    const d = $('#detail');
+    if (!l) { d.innerHTML = ''; return; }
+    const byRound = {}; l.rounds.forEach(r => byRound[r.round] = r);
+    const roundsHtml = l.files.map(f => {
+      const r = byRound[f.round] || {};
+      const verdictChip = r.verdict ? chip(r.verdict === 'approved' ? 'approved' : 'changes') : '';
+      return `<div class="round">
+        <h3>Round ${f.round} ${r.verdict ? `<span class="chip ${r.verdict === 'approved' ? 'good' : 'serious'}"><i></i>${esc(r.verdict.replace('_', ' '))}</span>` : ''}
+          ${r.blocking != null ? `<span class="chip neutral"><i></i>${r.blocking} blocking</span>` : ''}
+          ${r.duration_s != null ? `<span class="chip neutral"><i></i>review ${fmtDur(r.duration_s)}</span>` : ''}</h3>
+        <div class="pair">
+          <div class="doc"><div class="who">Coder</div><div class="md">${f.coder ? md(f.coder) : '<span class="empty">not written</span>'}</div></div>
+          <div class="doc"><div class="who">Reviewer</div><div class="md">${f.review ? md(f.review) : '<span class="empty">no review</span>'}</div></div>
+        </div>
+        ${(r.coder || r.reviewer) ? `<table class="usage-table"><thead><tr><th>Agent</th><th class="num">Input</th><th class="num">Cached</th><th class="num">Cache write</th><th class="num">Output</th><th class="num">Reasoning</th><th class="num">Cost</th></tr></thead><tbody>${usageRows('coder (' + esc((r.coder || {}).model || '–') + ')', r.coder && { ...r.coder, any: true })}${usageRows('reviewer (' + esc((r.reviewer || {}).model || '–') + ')', r.reviewer && { ...r.reviewer, any: true })}</tbody></table>` : ''}
+      </div>`;
+    }).join('');
+    d.innerHTML = `<div class="card">
+      <div class="detail-head"><h2>${esc(l.task)}</h2>${chip(l.outcome)}<span class="spacer"></span><button type="button" id="close">Close</button></div>
+      <div class="kv"><span>id <b class="mono">${esc(l.id)}</b></span><span>backend <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}</b></span>
+        <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b></span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
+        ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
+        ${l.usage ? `<span>cost <b>${fmtCost(l.cost)}</b></span>` : ''}<span>dir <b class="mono">${esc(l.dir)}</b></span></div>
+      ${roundsHtml || '<div class="empty">No rounds yet.</div>'}
+      ${l.summary ? `<div class="round"><h3>Summary</h3><div class="doc"><div class="md">${md(l.summary)}</div></div></div>` : ''}
+    </div>`;
+    $('#close').onclick = () => select(null);
+  }
+
+  const initial = decodeURIComponent(location.hash.slice(1));
+  if (initial && loops.some(l => l.id === initial)) selected = initial;
+  render();
+})();
+</script>
+</body>
+</html>
