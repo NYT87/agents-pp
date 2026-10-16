@@ -24,8 +24,11 @@ Options:
   --git-exclude      add the loop dir and pointer to .git/info/exclude
   -h, --help         show this help
 
-Config precedence: flags > REVIEW_LOOP_* env > ./.claude/review-loop.json
-                   > ~/.claude/review-loop.json > defaults
+Config precedence: flags > REVIEW_LOOP_* env > ./.<provider>/review-loop.json
+                   > ./.review-loop.json (its providers.<provider> section over its
+                   top-level keys) > ~/.<provider>/review-loop.json
+                   > ~/.config/review-loop/config.json > defaults
+                   (provider: REVIEW_LOOP_PROVIDER, else claude; see config.sh show)
 HELP
 }
 

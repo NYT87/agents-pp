@@ -10,7 +10,8 @@ runtime deps are `jq` and optionally `git`.
 
 - `skills/review-loop/scripts/lib.sh` — all shared helpers (config, state, verdict parsing, finalize). Source it; never duplicate its logic.
 - `scripts/start.sh | status.sh | cancel.sh` — user-facing lifecycle.
-- `scripts/config.sh` — the only writer of the config files (show/set/unset/init/gitignore/keys); key list, types and validation live there. The `/review-config` skill asks the questions and calls it.
+- `scripts/config.sh` — the only writer of the config files (show/create/set/unset/init/gitignore/keys); key list, types and validation live there. The `/review-config` skill asks the questions and calls it.
+- Config files are provider-neutral (`rl_config_files`, `rl_provider`, `rl_resolve_config` in `lib.sh`): shared `./.review-loop.json` and `~/.config/review-loop/config.json` (top-level keys plus `providers.<name>` sections) and per-provider `./.<provider>/review-loop.json`. Never read a config path directly; always go through `rl_resolve_config`.
 - `scripts/review.sh` — runs a backend and owns every state transition (round advance, approve, cap).
 - `scripts/stop-hook.sh` — Claude Code Stop hook; enforcement only, no transitions.
 - `scripts/resume-hook.sh` — UserPromptSubmit hook; only ends a pause (`rl_resume_pause`), never blocks.

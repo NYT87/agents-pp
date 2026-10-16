@@ -119,7 +119,7 @@ Every round records two durations in `state.json` (`rounds[]`): `coder_duration_
 
 ### Usage tracking (opt-in)
 
-Off by default. Enable it per run with `--usage`, per project or user with `"usage": true` in the config file, or with `REVIEW_LOOP_USAGE=1`. When on, every round records what each agent consumed, in `usage.md` and in `state.json` (`rounds[]`), with totals in `summary.md` and in `/review-status`:
+Off by default. Enable it per run with `--usage`, per project or user with `"usage": true` in a config file, or with `REVIEW_LOOP_USAGE=1`. When on, every round records what each agent consumed, in `usage.md` and in `state.json` (`rounds[]`), with totals in `summary.md` and in `/review-status`:
 
 | Round / agent | Model | Input (uncached) | Cached input | Cache write | Output | Reasoning | Cost USD | Turns | Duration s |
 |---|---|---|---|---|---|---|---|---|---|
@@ -142,7 +142,7 @@ Backends report usage through an optional sidecar file (see "Reviewer backends")
 bash plugins/review-loop/skills/review-loop/scripts/dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open]
 ```
 
-Generates a self-contained `dashboard.html` (default: inside the storage dir) from every loop folder it finds and opens it in your browser. With no arguments everything comes from the config file, so a bare `/review-dashboard` is enough:
+Generates a self-contained `dashboard.html` (default: inside the storage dir) from every loop folder it finds and opens it in your browser. With no arguments everything comes from the config files, so a bare `/review-dashboard` is enough:
 
 ```json
 {
@@ -159,25 +159,42 @@ Generates a self-contained `dashboard.html` (default: inside the storage dir) fr
 
 ## Configuration
 
-The quickest way is the configuration wizard:
+The loop can be driven by different coder providers (Claude Code today; Codex or others later), so configuration is provider-neutral. Two styles work, alone or together:
+
+- **One shared file for every provider**, with optional per-provider overrides:
+  - project: `./.review-loop.json`
+  - user: `~/.config/review-loop/config.json` (`XDG_CONFIG_HOME` honoured)
+  ```json
+  { "backend": "codex", "max_rounds": 5,
+    "providers": { "claude": { "backend": "claude", "model": "opus" }, "codex": { "max_rounds": 3 } } }
+  ```
+- **One file per provider**, plain keys only: `./.<provider>/review-loop.json` or `~/.<provider>/review-loop.json`, for example `.claude/review-loop.json` (which is also where earlier versions kept the config, so existing files keep working) or `.codex/review-loop.json`.
+
+The running provider is `REVIEW_LOOP_PROVIDER` when set (`none` disables provider files and sections), otherwise `claude`, so a plain shell behaves like Claude Code and keeps reading existing `.claude/review-loop.json` files; a Codex or other provider's instructions export `REVIEW_LOOP_PROVIDER=codex`. An explicit `--provider NAME` or `--provider-file NAME` also selects whose values `config.sh show` and `init` report, so you can configure Codex from a Claude session. When you give no scope flag at all and the project's shared file does not exist yet but your provider's own project file does (a project that already has `.claude/review-loop.json`), `config.sh` edits that file and says so; every explicit flag, including `--user`, targets exactly the file it names. Whenever a value you write is masked by a higher-precedence source, it warns and names the file that sets the effective value. Precedence, highest first: flags → `REVIEW_LOOP_*` env → project provider file → project shared file (its `providers.<name>` section over its top-level keys) → user provider file → user shared file → defaults. Values are frozen into `state.json` when a loop starts.
+
+The quickest way to set things up is the wizard:
 
 ```
-/review-config            # project file ./.claude/review-loop.json (default)
-/review-config --user     # personal defaults in ~/.claude/review-loop.json
+/review-config                 # project shared file ./.review-loop.json (default)
+/review-config --user          # user shared file
+/review-config --provider      # the providers.<current> section of the shared file
+/review-config --provider-file # a separate ./.<current>/review-loop.json
 ```
 
-It shows the current value of every setting, asks what to change, writes the file through `config.sh`, and finally offers to add the loop's paths (storage dir, pointer file, dashboard file) to `.gitignore`. Re-run it any time to update values. The same works outside Claude Code, from your project's root (the script lives in the plugin; adjust the path to where you installed it, e.g. `~/.claude/skills/review-loop/scripts/config.sh` for the standalone skill):
+It shows the current value of every setting and where it comes from, asks what to change, writes the file through `config.sh`, and finally offers to add the loop's paths (storage dir, pointer file, dashboard file) to `.gitignore`. Re-run it any time to update values. The same works outside Claude Code, from your project's root (the script lives in the plugin; adjust the path to where you installed it, e.g. `~/.claude/skills/review-loop/scripts/config.sh` for the standalone skill):
 
 ```bash
 CFG=plugins/review-loop/skills/review-loop/scripts/config.sh   # path inside this repo
-bash $CFG show                 # effective, project, user and default values
-bash $CFG create               # empty project file, everything inherited
+bash $CFG show                                   # effective value, source and default per key, files found
+bash $CFG create                                 # empty project file, everything inherited
 bash $CFG set backend=claude model=opus max_rounds=3 usage=true
+bash $CFG set --provider codex max_rounds=3      # providers.codex section of ./.review-loop.json
+bash $CFG set --provider-file claude model=opus  # ./.claude/review-loop.json
 bash $CFG set --user dir=reviews dashboard.auto=true
 bash $CFG unset model
-bash $CFG init                 # interactive wizard: Enter keeps a value, "-" clears model/dashboard.out/dashboard.dirs
-bash $CFG gitignore --dry-run  # paths that would be ignored
-bash $CFG keys                 # all keys with types
+bash $CFG init                                   # interactive wizard: Enter keeps a value, "-" clears model/dashboard.out/dashboard.dirs
+bash $CFG gitignore --dry-run                    # paths that would be ignored
+bash $CFG keys                                   # all keys with types
 ```
 
 With `dir` set to the project root (`.`), `gitignore` writes a pattern matching loop-id folder names (`YYYYMMDD-HHMMSS-xxxxxx`) so future loops are covered too; any other folder with that exact shape would be ignored as well.
@@ -191,9 +208,7 @@ With `dir` set to the project root (`.`), `gitignore` writes a pattern matching 
 | Usage tracking | `--usage` / `--no-usage` | `REVIEW_LOOP_USAGE` | `usage` | `false` |
 | Dashboard | `--dir` / `--out` / `--open` | `REVIEW_LOOP_DASHBOARD_OPEN`, `REVIEW_LOOP_DASHBOARD_OUT` | `dashboard.{dirs,out,open,auto}` | loop dir, `<dir>/dashboard.html`, `true`, `false` |
 
-Precedence (highest first): flags → env → `./.claude/review-loop.json` → `~/.claude/review-loop.json` → defaults. Values are frozen into `state.json` when a loop starts.
-
-Example `~/.claude/review-loop.json`:
+Example `~/.config/review-loop/config.json`:
 
 ```json
 { "backend": "claude", "model": "opus", "max_rounds": 3, "dir": "docs/reviews", "usage": true }

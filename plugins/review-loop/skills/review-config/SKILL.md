@@ -1,7 +1,7 @@
 ---
 name: review-config
 description: Create or update the review-loop configuration file by answering a few questions (backend, model, rounds, storage dir, usage tracking, dashboard), showing the current values, and optionally adding the loop's paths to .gitignore.
-argument-hint: "[--user|--project]"
+argument-hint: "[--user|--project] [--provider [NAME] | --provider-file [NAME]]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh *)
@@ -20,16 +20,30 @@ All writes go through `config.sh`; never write the file yourself.
 bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh show --json $ARGUMENTS
 ```
 
-The output has `effective` (what applies now), `defaults`, and the `project`
-and `user` files with whether each exists and its values. `scope` and `target`
-say which file will be written (`--project` → `./.claude/review-loop.json`,
-the default; `--user` → `~/.claude/review-loop.json`).
+The output has `effective` (what applies for the selected provider: the one
+named with `--provider`/`--provider-file`, else the running one), `defaults`,
+`provider`, `target_exists` / `section_exists` (whether the place writes go to
+already exists), an optional `note` (when no scope flag was given and an existing
+project provider file was chosen because the project shared file does not
+exist yet; `--user` and the other flags always target what they name), and
+`files`: every config
+file that is consulted, lowest precedence first, with whether it exists and
+its values. `target`, `mode` and `section` say where writes go:
+
+- `--project` (default): `./.review-loop.json`, shared by every provider
+- `--user`: `~/.config/review-loop/config.json`, shared, every project
+- `--provider [NAME]`: the `providers.NAME` section of that shared file
+- `--provider-file [NAME]`: a separate `./.NAME/review-loop.json`
+  (e.g. `.claude/review-loop.json`, `.codex/review-loop.json`)
 
 ## 2. Ask the questions
 
-If the user passed neither `--user` nor `--project`, first ask which file to
-write: the project file (recommended, shared with the repo) or the user file
-(personal defaults for every project).
+If the user passed no scope flag, first ask where to write: the project shared
+file (recommended, committed with the repo, applies to every provider), the
+user shared file (personal defaults for every project), or a provider-specific
+place (the `providers.<name>` section, or a separate `.<name>/review-loop.json`)
+when the values should apply only to one coder provider such as Claude or Codex.
+Pass the matching flags to every `config.sh` call below.
 
 Then ask about every key, in two batches at most, **showing the current
 effective value in each question** and offering it as the first option:
@@ -51,19 +65,24 @@ ask for a comma-separated list.
 ## 3. Write the values
 
 Run one `set` with only the keys whose answer differs from the current value.
-If nothing changed, say so; and if the target file does not exist yet
-(`exists: false` in step 1), still create it so the user ends up with a file:
+If nothing changed, say so; and if the place writes go to does not exist yet
+(`section_exists: false` in step 1), still create it so the user ends up with a
+file (or section):
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh create [--user|--project]
+bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh create [scope flags]
 ```
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh set [--user|--project] backend=claude model=opus max_rounds=3 usage=true
+bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh set [scope flags] backend=claude model=opus max_rounds=3 usage=true
 ```
 
 Booleans accept `true/false`, `yes/no`. If `set` reports a validation error,
-tell the user and ask that question again.
+tell the user and ask that question again. If it prints a `warning:` that a
+value is masked by a higher-precedence source (for example an existing
+`.claude/review-loop.json` when writing the shared file), tell the user which
+file sets the effective value and offer to write there instead
+(`--provider-file`).
 
 ## 4. Last: .gitignore
 

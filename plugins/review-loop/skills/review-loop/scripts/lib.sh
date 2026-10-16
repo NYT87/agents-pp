@@ -175,19 +175,77 @@ rl_find_excludes() {
   done
 }
 
+# ── Configuration files ──────────────────────────────────────────────────────
+# The loop can be driven by different coder providers (Claude Code today,
+# Codex or others later). Configuration is therefore provider-neutral:
+#
+#   user shared       ~/.config/review-loop/config.json   (XDG_CONFIG_HOME honoured)
+#   user provider     ~/.<provider>/review-loop.json       e.g. ~/.claude/review-loop.json
+#   project shared    ./.review-loop.json
+#   project provider  ./.<provider>/review-loop.json       e.g. ./.claude/review-loop.json
+#
+# A shared file holds top-level keys for every provider and may carry
+# per-provider overrides under "providers": {"claude": {...}, "codex": {...}}.
+# A provider file holds plain keys for that provider only. Both styles work
+# together; later entries in the list above win, then REVIEW_LOOP_* env, then
+# flags.
+RL_CONFIG_NAME="review-loop.json"
+
+# rl_valid_provider_name NAME -> 0 when NAME is a letter or digit followed by
+# letters, digits, "_" or "-". Matches the whole string (Bash regex, not a
+# line-based grep), so a leading "-" or an embedded newline never passes.
+rl_valid_provider_name() {
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
+}
+
+# rl_provider -> the coder provider running the loop: REVIEW_LOOP_PROVIDER
+# (lower-cased; "none" disables provider files and sections; an invalid name
+# counts as unset), else "claude". Claude Code is the only provider today, so a
+# plain shell behaves as Claude and keeps reading the legacy
+# .claude/review-loop.json files; other providers export REVIEW_LOOP_PROVIDER.
+rl_provider() {
+  local p="${REVIEW_LOOP_PROVIDER:-}"
+  if [ -n "$p" ]; then
+    p=$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')
+    [ "$p" = "none" ] && { echo ""; return 0; }
+    if rl_valid_provider_name "$p"; then echo "$p"; return 0; fi
+  fi
+  echo "claude"
+}
+
+rl_user_config_dir() { echo "${XDG_CONFIG_HOME:-$HOME/.config}/review-loop"; }
+
+# rl_config_files [ROOT] -> "LABEL<TAB>PATH<TAB>KIND" per line, lowest precedence
+# first. KIND is "shared" (top-level keys + providers section) or "provider".
+rl_config_files() {
+  local root="${1:-$PWD}" p
+  p=$(rl_provider)
+  printf 'user shared\t%s/config.json\tshared\n' "$(rl_user_config_dir)"
+  [ -n "$p" ] && printf 'user %s\t%s/.%s/%s\tprovider\n' "$p" "$HOME" "$p" "$RL_CONFIG_NAME"
+  printf 'project shared\t%s/.%s\tshared\n' "$root" "$RL_CONFIG_NAME"
+  [ -n "$p" ] && printf 'project %s\t%s/.%s/%s\tprovider\n' "$p" "$root" "$p" "$RL_CONFIG_NAME"
+  return 0
+}
+
 # rl_resolve_config -> JSON with dir, max_rounds, backend, model, usage,
 # dashboard {dirs, out, open, auto}. Nested objects merge key by key.
-# Precedence (low -> high): defaults, ~/.claude/review-loop.json,
-# ./.claude/review-loop.json, REVIEW_LOOP_* env. Flags are applied by start.sh.
+# Precedence (low -> high): defaults, the files from rl_config_files in order
+# (for a shared file: its top-level keys, then its providers.<provider>
+# section), REVIEW_LOOP_* env. Flags are applied by start.sh.
 rl_resolve_config() {
   local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false}}'
-  local user_cfg="{}" proj_cfg="{}" env_cfg
-  if [ -f "$HOME/.claude/review-loop.json" ]; then
-    user_cfg=$(jq -c . "$HOME/.claude/review-loop.json" 2>/dev/null) || user_cfg="{}"
-  fi
-  if [ -f ".claude/review-loop.json" ]; then
-    proj_cfg=$(jq -c . ".claude/review-loop.json" 2>/dev/null) || proj_cfg="{}"
-  fi
+  local cfg="$defaults" env_cfg label path kind file_cfg p
+  p=$(rl_provider)
+  while IFS=$'\t' read -r label path kind; do
+    [ -f "$path" ] || continue
+    file_cfg=$(jq -c . "$path" 2>/dev/null) || continue
+    if [ "$kind" = "shared" ]; then
+      cfg=$(jq -cn --argjson a "$cfg" --argjson b "$file_cfg" --arg p "$p" \
+        '$a * ($b | del(.providers)) * (if $p != "" then (($b.providers // {})[$p] // {}) else {} end)')
+    else
+      cfg=$(jq -cn --argjson a "$cfg" --argjson b "$file_cfg" '$a * ($b | del(.providers))')
+    fi
+  done < <(rl_config_files)
   env_cfg=$(jq -n \
     --arg dir "${REVIEW_LOOP_DIR:-}" \
     --arg mr "${REVIEW_LOOP_MAX_ROUNDS:-}" \
@@ -204,8 +262,30 @@ rl_resolve_config() {
      + (if $usage != "" then {usage: ($usage | ascii_downcase | IN("1","true","yes","on"))} else {} end)
      + (if $dopen != "" then {dashboard: {open: ($dopen | ascii_downcase | IN("1","true","yes","on"))}} else {} end)
      + (if $dout  != "" then {dashboard: {out: $dout}} else {} end)')
-  jq -n --argjson d "$defaults" --argjson u "$user_cfg" --argjson p "$proj_cfg" --argjson e "$env_cfg" \
-    '$d * $u * $p * $e'
+  jq -cn --argjson c "$cfg" --argjson e "$env_cfg" '$c * $e'
+}
+
+# rl_config_source KEY -> label of the highest-precedence source that sets KEY
+# ("env", "<file label>", "<file label> (providers.<p>)" or "default").
+rl_config_source() {
+  local key="$1" p label path kind result="default" envname
+  p=$(rl_provider)
+  case "$key" in
+    dir) envname=REVIEW_LOOP_DIR ;; max_rounds) envname=REVIEW_LOOP_MAX_ROUNDS ;;
+    backend) envname=REVIEW_LOOP_BACKEND ;; model) envname=REVIEW_LOOP_MODEL ;;
+    usage) envname=REVIEW_LOOP_USAGE ;; dashboard.open) envname=REVIEW_LOOP_DASHBOARD_OPEN ;;
+    dashboard.out) envname=REVIEW_LOOP_DASHBOARD_OUT ;; *) envname="" ;;
+  esac
+  if [ -n "$envname" ] && [ -n "$(eval "printf '%s' \"\${$envname:-}\"")" ]; then echo "env $envname"; return 0; fi
+  while IFS=$'\t' read -r label path kind; do
+    [ -f "$path" ] || continue
+    if [ "$kind" = "shared" ] && [ -n "$p" ] && [ "$(jq -r --arg p "$p" --arg k "$key" '(.providers // {})[$p] // {} | getpath($k | split(".")) != null' "$path" 2>/dev/null)" = "true" ]; then
+      result="$label (providers.$p)"
+    elif [ "$(jq -r --arg k "$key" 'del(.providers) | getpath($k | split(".")) != null' "$path" 2>/dev/null)" = "true" ]; then
+      result="$label"
+    fi
+  done < <(rl_config_files)
+  echo "$result"
 }
 
 # rl_state_get LOOP_DIR KEY

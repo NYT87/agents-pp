@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
-# review-loop — create, inspect and update the configuration file.
+# review-loop — create, inspect and update the configuration files.
 #
 # Usage:
-#   config.sh show      [--user|--project] [--json]   current values, per file and effective
-#   config.sh create    [--user|--project]            create the file ({}) if it does not exist
-#   config.sh set       [--user|--project] KEY=VALUE ...
-#   config.sh unset     [--user|--project] KEY ...
-#   config.sh init      [--user|--project] [--yes]    interactive wizard (Enter keeps a value, "-" clears
-#                                                     model / dashboard.out / dashboard.dirs)
-#   config.sh gitignore [--dry-run]                   add the loop's paths to .gitignore
-#   config.sh keys                                    list keys with types and descriptions
+#   config.sh show      [scope] [--json]          current values, where each comes from
+#   config.sh create    [scope]                   create the file ({}) if it does not exist
+#   config.sh set       [scope] KEY=VALUE ...
+#   config.sh unset     [scope] KEY ...
+#   config.sh init      [scope] [--yes]           interactive wizard (Enter keeps a value, "-" clears
+#                                                 model / dashboard.out / dashboard.dirs)
+#   config.sh gitignore [--dry-run]               add the loop's paths to .gitignore
+#   config.sh keys                                list keys with types and descriptions
 #
-# Scope: --project writes ./.claude/review-loop.json (default), --user writes
-# ~/.claude/review-loop.json. Effective precedence stays: flags > env > project > user > defaults.
+# Scope (which file, and where inside it):
+#   --project                ./.review-loop.json, shared by every provider      (default)
+#   --user                   ~/.config/review-loop/config.json, shared, every project
+#   --provider [NAME]        the "providers.NAME" section of the chosen shared file
+#   --provider-file [NAME]   a separate file for one provider: ./.NAME/review-loop.json
+#                            (or ~/.NAME/review-loop.json with --user), e.g. .claude/, .codex/
+#   NAME defaults to the running provider (REVIEW_LOOP_PROVIDER, else "claude"); an explicit
+#   NAME also selects whose effective values show/init report.
+#
+# Effective precedence: flags > REVIEW_LOOP_* env > project provider file > project shared
+# (providers section over top-level) > user provider file > user shared > defaults.
 #
 # Keys:
 #   backend         reviewer backend (a script in scripts/backends/)   string
@@ -57,16 +66,36 @@ key_help() {
   esac
 }
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 CMD="${1:-}"; [ $# -gt 0 ] && shift
-SCOPE=project JSON=0 YES=0 DRY=0
+SCOPE=project JSON=0 YES=0 DRY=0 MODE=shared PNAME="" EXPLICIT=0
 ARGS=()
+# Provider names are validated as whole strings by rl_valid_provider_name (lib.sh):
+# a letter or digit followed by letters, digits, "_" or "-". Nothing starting with
+# "-" (or containing a newline) qualifies, so a following flag is never taken as a name.
+take_name() { # optional NAME after --provider / --provider-file
+  # Returns 1 when no name follows: the next word is a flag, a KEY=VALUE, a
+  # config key or a command. Anything else was meant as a name: it is printed
+  # lower-cased when valid, and the command fails when it is not, so an invalid
+  # name never silently falls back to the running provider.
+  [ $# -gt 1 ] || return 1
+  local n
+  case "$2" in -*|*=*) return 1 ;; show|create|set|unset|init|gitignore|keys) return 1 ;; esac
+  key_type "$2" > /dev/null 2>&1 && return 1
+  n=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
+  rl_valid_provider_name "$n" || rl_die "invalid provider name '$2' (letters, digits, '_' and '-', not starting with '-')"
+  printf '%s' "$n"
+}
 while [ $# -gt 0 ]; do
   case "$1" in
-    --user) SCOPE=user; shift ;;
-    --project) SCOPE=project; shift ;;
+    --user) SCOPE=user; EXPLICIT=1; shift ;;
+    --project) SCOPE=project; EXPLICIT=1; shift ;;
+    --provider=*) MODE=section; EXPLICIT=1; PNAME="${1#*=}"; shift ;;
+    --provider) MODE=section; EXPLICIT=1; if PNAME=$(take_name "$@"); then shift 2; else PNAME=""; shift; fi ;;
+    --provider-file=*) MODE=file; EXPLICIT=1; PNAME="${1#*=}"; shift ;;
+    --provider-file) MODE=file; EXPLICIT=1; if PNAME=$(take_name "$@"); then shift 2; else PNAME=""; shift; fi ;;
     --json) JSON=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --dry-run) DRY=1; shift ;;
@@ -75,9 +104,35 @@ while [ $# -gt 0 ]; do
   esac
 done
 ROOT="$PWD"
-PROJECT_FILE="$ROOT/.claude/review-loop.json"
-USER_FILE="$HOME/.claude/review-loop.json"
-case "$SCOPE" in user) TARGET="$USER_FILE" ;; *) TARGET="$PROJECT_FILE" ;; esac
+PROVIDER=$(rl_provider)
+AUTO_NOTE=""
+# No scope flag at all: when the project's shared file does not exist yet but
+# this provider's own project file does (e.g. a legacy .claude/review-loop.json),
+# edit that file, since it outranks the shared one and a write there would be
+# masked. Any explicit flag (--project, --user, --provider, --provider-file)
+# targets exactly what it names; masked writes are then reported by warn_masked.
+if [ "$EXPLICIT" = "0" ] && [ -n "$PROVIDER" ] \
+   && [ ! -f "$ROOT/.$RL_CONFIG_NAME" ] && [ -f "$ROOT/.$PROVIDER/$RL_CONFIG_NAME" ]; then
+  MODE=file; PNAME="$PROVIDER"
+  AUTO_NOTE="using the existing $ROOT/.$PROVIDER/$RL_CONFIG_NAME (no shared $ROOT/.$RL_CONFIG_NAME yet; pass --project to create the shared file instead)"
+fi
+if [ "$MODE" != "shared" ]; then
+  PNAME=$(printf '%s' "$PNAME" | tr '[:upper:]' '[:lower:]')
+  [ -n "$PNAME" ] || PNAME="$PROVIDER"
+  [ -n "$PNAME" ] || rl_die "no provider given and none selected (pass --provider NAME or set REVIEW_LOOP_PROVIDER)"
+  rl_valid_provider_name "$PNAME" || rl_die "invalid provider name '$PNAME' (letters, digits, '_' and '-', not starting with '-')"
+  [ "$PNAME" != "none" ] || rl_die "'none' is not a provider: it disables provider files and sections, so values stored under it could never apply"
+  # An explicit provider selects whose configuration is shown, edited and
+  # resolved, even from another provider's session.
+  PROVIDER="$PNAME"
+  export REVIEW_LOOP_PROVIDER="$PNAME"
+fi
+case "$SCOPE" in user) BASE="$HOME"; SHARED="$(rl_user_config_dir)/config.json" ;; *) BASE="$ROOT"; SHARED="$ROOT/.$RL_CONFIG_NAME" ;; esac
+case "$MODE" in
+  file) TARGET="$BASE/.$PNAME/$RL_CONFIG_NAME"; SECTION='[]'; WHERE="$TARGET" ;;
+  section) TARGET="$SHARED"; SECTION="$(jq -cn --arg p "$PNAME" '["providers", $p]')"; WHERE="$TARGET (providers.$PNAME)" ;;
+  *) TARGET="$SHARED"; SECTION='[]'; WHERE="$TARGET" ;;
+esac
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 read_file() { if [ -f "$1" ]; then jq -c . "$1" 2>/dev/null || rl_die "$1 is not valid JSON"; else echo '{}'; fi; }
@@ -87,6 +142,12 @@ write_file() { # FILE JSON
 }
 path_filter() { printf '%s' "$1" | jq -R 'split(".")'; }
 get_in() { jq -c --argjson p "$(path_filter "$2")" 'getpath($p)' <<< "$1"; }
+# Paths inside the target file, prefixed with the provider section when one is selected.
+tpath() { jq -cn --argjson s "$SECTION" --argjson p "$(path_filter "$1")" '$s + $p'; }
+set_in_target() { # KEY JSONVALUE -> updates $NEW
+  NEW=$(jq -c --argjson p "$(tpath "$1")" --argjson v "$2" 'setpath($p; $v)' <<< "$NEW")
+}
+target_values() { jq -c --argjson s "$SECTION" 'getpath($s) // {}' <<< "$NEW"; }
 display() { # JSON value -> human string
   jq -r 'if . == null then "-" elif type == "array" then (if length == 0 then "(none)" else join(",") end) elif . == "" then "(empty)" else tostring end' <<< "$1"
 }
@@ -120,7 +181,20 @@ coerce() {
 apply_set() { # KEY RAW -> updates $NEW
   local key="$1" raw="$2" val
   val=$(coerce "$key" "$raw") || exit 1
-  NEW=$(jq -c --argjson p "$(path_filter "$key")" --argjson v "$val" 'setpath($p; $v)' <<< "$NEW")
+  set_in_target "$key" "$val"
+}
+
+# warn_masked KEY... -> after a write, warn for every key whose effective value
+# still comes from a higher-precedence source than the file just written.
+warn_masked() {
+  local eff k wrote have src
+  eff=$(rl_resolve_config)
+  for k in "$@"; do
+    wrote=$(get_in "$(target_values)" "$k"); have=$(get_in "$eff" "$k")
+    [ "$wrote" = "$have" ] && continue
+    src=$(rl_config_source "$k")
+    echo "warning: $k=$(display "$wrote") was written to $WHERE but the effective value is $(display "$have"), set by $src; change it there (e.g. --provider-file $PROVIDER) or remove the override" >&2
+  done
 }
 
 # ── Commands ─────────────────────────────────────────────────────────────────
@@ -129,49 +203,75 @@ cmd_keys() {
 }
 
 cmd_show() {
-  local eff proj usr def
+  local eff def label path kind
   eff=$(rl_resolve_config)
-  proj=$(read_file "$PROJECT_FILE"); usr=$(read_file "$USER_FILE")
-  def=$(HOME=/nonexistent REVIEW_LOOP_DIR= REVIEW_LOOP_MAX_ROUNDS= REVIEW_LOOP_BACKEND= REVIEW_LOOP_MODEL= REVIEW_LOOP_USAGE= \
-        REVIEW_LOOP_DASHBOARD_OPEN= REVIEW_LOOP_DASHBOARD_OUT= bash -c 'cd / && . "$1" && rl_resolve_config' _ "$RL_SCRIPTS_DIR/lib.sh")
+  def=$(HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent REVIEW_LOOP_PROVIDER=none REVIEW_LOOP_DIR= REVIEW_LOOP_MAX_ROUNDS= REVIEW_LOOP_BACKEND= \
+        REVIEW_LOOP_MODEL= REVIEW_LOOP_USAGE= REVIEW_LOOP_DASHBOARD_OPEN= REVIEW_LOOP_DASHBOARD_OUT= \
+        bash -c 'cd / && . "$1" && rl_resolve_config' _ "$RL_SCRIPTS_DIR/lib.sh")
   if [ "$JSON" = "1" ]; then
-    jq -n --argjson e "$eff" --argjson p "$proj" --argjson u "$usr" --argjson d "$def" \
-      --arg pf "$PROJECT_FILE" --arg uf "$USER_FILE" --arg scope "$SCOPE" --arg target "$TARGET" \
-      --argjson pe "$([ -f "$PROJECT_FILE" ] && echo true || echo false)" --argjson ue "$([ -f "$USER_FILE" ] && echo true || echo false)" \
-      '{scope: $scope, target: $target, effective: $e, defaults: $d,
-        project: {path: $pf, exists: $pe, values: $p}, user: {path: $uf, exists: $ue, values: $u}}'
+    local files='[]'
+    while IFS=$'\t' read -r label path kind; do
+      files=$(jq -c --argjson a "$files" --arg l "$label" --arg p "$path" --arg k "$kind" \
+        --argjson e "$([ -f "$path" ] && echo true || echo false)" --argjson v "$(read_file "$path")" -n \
+        '$a + [{label: $l, path: $p, kind: $k, exists: $e, values: $v}]')
+    done < <(rl_config_files)
+    jq -n --argjson e "$eff" --argjson d "$def" --argjson f "$files" --arg prov "$PROVIDER" \
+      --arg scope "$SCOPE" --arg mode "$MODE" --arg target "$TARGET" --argjson section "$SECTION" \
+      --argjson te "$([ -f "$TARGET" ] && echo true || echo false)" \
+      --argjson se "$(NEW=$(read_file "$TARGET"); if [ "$SECTION" = "[]" ]; then [ -f "$TARGET" ] && echo true || echo false; else jq -c --argjson s "$SECTION" 'getpath($s) != null' <<< "$NEW"; fi)" \
+      --arg note "$AUTO_NOTE" \
+      '{provider: (if $prov == "" then null else $prov end), scope: $scope, mode: $mode, target: $target,
+        section: $section, target_exists: $te, section_exists: $se, note: (if $note == "" then null else $note end),
+        effective: $e, defaults: $d, files: $f}'
     return
   fi
   echo "review-loop configuration"
-  echo "  project file: $PROJECT_FILE ($([ -f "$PROJECT_FILE" ] && echo exists || echo missing))"
-  echo "  user file:    $USER_FILE ($([ -f "$USER_FILE" ] && echo exists || echo missing))"
+  echo "  provider: ${PROVIDER:-none} ($([ "$MODE" != "shared" ] && echo "selected with --provider" || echo "set REVIEW_LOOP_PROVIDER to override"))"
+  echo "  files, lowest precedence first:"
+  while IFS=$'\t' read -r label path kind; do
+    printf '    %-16s %s (%s)\n' "$label" "$path" "$([ -f "$path" ] && echo exists || echo missing)"
+  done < <(rl_config_files)
+  echo "  writes go to: $WHERE"
+  [ -n "$AUTO_NOTE" ] && echo "  note: $AUTO_NOTE"
   echo
-  printf '  %-16s %-22s %-22s %-22s %s\n' key effective project user default
+  printf '  %-16s %-22s %-40s %s\n' key effective "set by" default
   for k in $KEYS; do
-    printf '  %-16s %-22s %-22s %-22s %s\n' "$k" "$(display "$(get_in "$eff" "$k")")" \
-      "$(display "$(get_in "$proj" "$k")")" "$(display "$(get_in "$usr" "$k")")" "$(display "$(get_in "$def" "$k")")"
+    printf '  %-16s %-22s %-40s %s\n' "$k" "$(display "$(get_in "$eff" "$k")")" "$(rl_config_source "$k")" "$(display "$(get_in "$def" "$k")")"
   done
   echo
-  echo "  (effective = flags > env > project > user > defaults; edit with: config.sh set KEY=VALUE)"
+  echo "  (edit with: config.sh set [--user] [--provider NAME | --provider-file NAME] KEY=VALUE)"
 }
 
 cmd_create() {
-  if [ -f "$TARGET" ]; then echo "$TARGET already exists"; return 0; fi
-  write_file "$TARGET" '{}'
-  echo "Created $TARGET (empty: every value is inherited, see: config.sh show)"
+  NEW=$(read_file "$TARGET")
+  if [ -f "$TARGET" ]; then
+    if [ "$SECTION" = "[]" ] || [ "$(jq -c --argjson s "$SECTION" 'getpath($s) != null' <<< "$NEW")" = "true" ]; then
+      echo "$WHERE already exists"; return 0
+    fi
+    NEW=$(jq -c --argjson s "$SECTION" 'setpath($s; {})' <<< "$NEW")
+  elif [ "$SECTION" != "[]" ]; then
+    NEW=$(jq -cn --argjson s "$SECTION" 'null | setpath($s; {})')
+  else
+    NEW='{}'
+  fi
+  write_file "$TARGET" "$NEW"
+  echo "Created $WHERE (empty: every value is inherited, see: config.sh show)"
 }
 
 cmd_set() {
   [ "${#ARGS[@]}" -gt 0 ] || rl_die "usage: config.sh set [--user|--project] KEY=VALUE ..."
   NEW=$(read_file "$TARGET")
-  local a
+  local a keys=()
   for a in "${ARGS[@]}"; do
     case "$a" in *=*) ;; *) rl_die "expected KEY=VALUE, got '$a'" ;; esac
     apply_set "${a%%=*}" "${a#*=}"
+    keys+=("${a%%=*}")
   done
   write_file "$TARGET" "$NEW"
-  echo "Updated $TARGET"
+  [ -n "$AUTO_NOTE" ] && echo "note: $AUTO_NOTE"
+  echo "Updated $WHERE"
   jq . "$TARGET" | sed 's/^/  /'
+  warn_masked "${keys[@]}"
 }
 
 cmd_unset() {
@@ -180,10 +280,11 @@ cmd_unset() {
   local k
   for k in "${ARGS[@]}"; do
     key_type "$k" > /dev/null || rl_die "unknown key '$k'"
-    NEW=$(jq -c --argjson p "$(path_filter "$k")" 'delpaths([$p]) | if .dashboard == {} then del(.dashboard) else . end' <<< "$NEW")
+    NEW=$(jq -c --argjson p "$(tpath "$k")" --argjson s "$SECTION" \
+      'delpaths([$p]) | (if (getpath($s + ["dashboard"]) == {}) then delpaths([$s + ["dashboard"]]) else . end)' <<< "$NEW")
   done
   write_file "$TARGET" "$NEW"
-  echo "Updated $TARGET"
+  echo "Updated $WHERE"
   jq . "$TARGET" | sed 's/^/  /'
 }
 
@@ -270,10 +371,11 @@ cmd_gitignore() {
 }
 
 cmd_init() {
-  local eff k cur raw val type
+  local eff k cur raw val type written=()
   eff=$(rl_resolve_config)
   NEW=$(read_file "$TARGET")
-  if [ -f "$TARGET" ]; then echo "Updating $TARGET (press Enter to keep the current value)"; else echo "Creating $TARGET (press Enter to keep the current value)"; fi
+  if [ -f "$TARGET" ]; then echo "Updating $WHERE (press Enter to keep the current value)"; else echo "Creating $WHERE (press Enter to keep the current value)"; fi
+  echo "  provider: ${PROVIDER:-none}"
   echo
   for k in $KEYS; do
     type=$(key_type "$k")
@@ -294,15 +396,17 @@ cmd_init() {
         raw=""
       fi
       if val=$(coerce "$k" "$raw"); then
-        NEW=$(jq -c --argjson p "$(path_filter "$k")" --argjson v "$val" 'setpath($p; $v)' <<< "$NEW"); break
+        set_in_target "$k" "$val"; written+=("$k"); break
       fi
       [ "$YES" = "1" ] && break
     done
   done
   write_file "$TARGET" "$NEW"
   echo
-  echo "Wrote $TARGET (only the values you set; the rest stay inherited, see: config.sh show)"
+  [ -n "$AUTO_NOTE" ] && echo "note: $AUTO_NOTE"
+  echo "Wrote $WHERE (only the values you set; the rest stay inherited, see: config.sh show)"
   jq . "$TARGET" | sed 's/^/  /'
+  [ "${#written[@]}" -gt 0 ] && warn_masked "${written[@]}"
   echo
   # Last step: .gitignore, now that the paths are known.
   local missing
@@ -316,14 +420,15 @@ cmd_init() {
   fi
 }
 
+no_args() { [ "${#ARGS[@]}" -eq 0 ] || rl_die "unexpected argument '${ARGS[0]}' for '$CMD'"; }
 case "$CMD" in
-  show) cmd_show ;;
-  create) cmd_create ;;
+  show) no_args; cmd_show ;;
+  create) no_args; cmd_create ;;
   set) cmd_set ;;
   unset) cmd_unset ;;
-  init) cmd_init ;;
-  gitignore) cmd_gitignore ;;
-  keys) cmd_keys ;;
+  init) no_args; cmd_init ;;
+  gitignore) no_args; cmd_gitignore ;;
+  keys) no_args; cmd_keys ;;
   ""|-h|--help|help) usage ;;
   *) rl_die "unknown command '$CMD' (show|create|set|unset|init|gitignore|keys)" ;;
 esac

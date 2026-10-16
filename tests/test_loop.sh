@@ -14,6 +14,8 @@ export REVIEW_LOOP_BACKEND=fake
 export REVIEW_LOOP_FAKE_FILE="$TMP/verdicts"
 unset REVIEW_LOOP_DIR REVIEW_LOOP_MAX_ROUNDS REVIEW_LOOP_MODEL REVIEW_LOOP_NESTED REVIEW_LOOP_DASHBOARD_OUT
 export REVIEW_LOOP_DASHBOARD_OPEN=0   # never launch a browser from the tests
+export REVIEW_LOOP_PROVIDER=claude    # deterministic provider regardless of where the suite runs
+export XDG_CONFIG_HOME="$HOME/.config"
 
 pass() { PASS=$((PASS + 1)); echo "  ok   $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  FAIL $1: $2"; }
@@ -623,23 +625,27 @@ assert_contains "show: missing project file" "review-loop.json (missing)" "$OUT"
 assert_contains "show: backend row shows env value and default" "codex" "$(printf '%s' "$OUT" | grep '^  backend ' | grep 'fake')"
 J=$(cd "$R" && bash "$C" show --json)
 assert_eq "show json: scope project" "project" "$(jq -r .scope <<< "$J")"
-assert_eq "show json: target is project file" "$R/.claude/review-loop.json" "$(jq -r .target <<< "$J")"
-assert_eq "show json: project missing" "false" "$(jq .project.exists <<< "$J")"
+assert_eq "show json: target is the shared project file" "$R/.review-loop.json" "$(jq -r .target <<< "$J")"
+assert_eq "show json: provider detected" "claude" "$(jq -r .provider <<< "$J")"
+assert_eq "show json: project shared missing" "false" "$(jq '[.files[] | select(.label == "project shared")][0].exists' <<< "$J")"
+assert_eq "show json: four files consulted" "4" "$(jq '.files | length' <<< "$J")"
 assert_eq "show json: effective default rounds" "5" "$(jq .effective.max_rounds <<< "$J")"
 OUT=$(cd "$R" && bash "$C" set backend=claude model=opus max_rounds=3 usage=yes dashboard.dirs=".review-loop, archive" dashboard.auto=1)
-assert_contains "set reports file" "Updated $R/.claude/review-loop.json" "$OUT"
-F="$R/.claude/review-loop.json"
+assert_contains "set reports file" "Updated $R/.review-loop.json" "$OUT"
+F="$R/.review-loop.json"
 assert_eq "set: string" "claude" "$(jq -r .backend "$F")"
 assert_eq "set: integer typed" "3" "$(jq .max_rounds "$F")"
 assert_eq "set: boolean from yes" "true" "$(jq .usage "$F")"
 assert_eq "set: list split and trimmed" '[".review-loop","archive"]' "$(jq -c .dashboard.dirs "$F")"
 assert_eq "set: nested boolean from 1" "true" "$(jq .dashboard.auto "$F")"
 (cd "$R" && bash "$C" set --user max_rounds=7 dir=reviews > /dev/null)
-assert_eq "set --user writes user file" "7" "$(jq .max_rounds "$HOME/.claude/review-loop.json")"
+UF="$HOME/.config/review-loop/config.json"
+assert_eq "set --user writes the user shared file" "7" "$(jq .max_rounds "$UF")"
 J=$(cd "$R" && bash "$C" show --json)
 assert_eq "effective: project beats user" "3" "$(jq .effective.max_rounds <<< "$J")"
 assert_eq "effective: user fills gaps" "reviews" "$(jq -r .effective.dir <<< "$J")"
-assert_contains "show prints current values per file" "max_rounds       3                      3                      7" "$(cd "$R" && bash "$C" show)"
+assert_contains "show names the source of each value" "max_rounds       3                      project shared" "$(cd "$R" && bash "$C" show)"
+assert_contains "show names the user source" "dir              reviews                user shared" "$(cd "$R" && bash "$C" show)"
 BEFORE=$(cat "$F")
 for bad in backend=nope max_rounds=0 max_rounds=x usage=maybe nokey=1 dir= ; do
   OUT=$(cd "$R" && bash "$C" set "$bad" 2>&1); RC=$?
@@ -674,6 +680,7 @@ OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
 assert_contains "gitignore: dashboard out inside root" "/docs/loops.html" "$OUT"
 assert_eq "gitignore: extra dashboard dir without loops adds nothing" "0" "$(printf '%s\n' "$OUT" | grep -c 'archive')"
 assert_not_contains "gitignore: dir outside root skipped" "elsewhere" "$OUT"
+rm -f "$UF"
 mkdir -p "$R/archive"; cp -R "$L" "$R/archive/"; echo unrelated > "$R/archive/README.md"
 OUT=$(cd "$R" && bash "$C" gitignore --dry-run)
 assert_contains "gitignore: extra dashboard dir offers its loop folder" "/archive/$(basename "$L")/" "$OUT"
@@ -681,13 +688,13 @@ assert_eq "gitignore: extra dashboard dir itself never ignored" "0" "$(printf '%
 
 R=$(new_repo r26); rm -f "$HOME/.claude/review-loop.json"
 OUT=$(cd "$R" && bash "$C" create)
-assert_contains "create: makes the file" "Created $R/.claude/review-loop.json" "$OUT"
-assert_eq "create: empty object" "{}" "$(jq -c . "$R/.claude/review-loop.json")"
+assert_contains "create: makes the file" "Created $R/.review-loop.json" "$OUT"
+assert_eq "create: empty object" "{}" "$(jq -c . "$R/.review-loop.json")"
 (cd "$R" && bash "$C" set max_rounds=2 > /dev/null)
 assert_contains "create: existing file untouched" "already exists" "$(cd "$R" && bash "$C" create)"
-assert_eq "create: values preserved" "2" "$(jq .max_rounds "$R/.claude/review-loop.json")"
+assert_eq "create: values preserved" "2" "$(jq .max_rounds "$R/.review-loop.json")"
 OUT=$(cd "$R" && bash "$C" create --user)
-assert_file "create --user" "$HOME/.claude/review-loop.json"; rm -f "$HOME/.claude/review-loop.json"
+assert_file "create --user" "$HOME/.config/review-loop/config.json"; rm -f "$HOME/.config/review-loop/config.json"
 start "$R" "seed" > /dev/null; L=$(pointer "$R"); (cd "$R" && bash "$S/cancel.sh" > /dev/null)
 mkdir -p "$R/my reviews"
 (cd "$R" && bash "$C" set dir="my reviews" dashboard.dirs="other dir,arch*ive" > /dev/null)
@@ -743,7 +750,7 @@ assert_contains "gitignore dir=.: idempotent with the pattern" "already covers" 
 
 R=$(new_repo r25); rm -f "$HOME/.claude/review-loop.json"
 OUT=$(cd "$R" && printf 'nope\nclaude\n\nabc\n4\n\nyes\n\n\nno\n\ny\n' | bash "$C" init 2>&1)
-F="$R/.claude/review-loop.json"
+F="$R/.review-loop.json"
 assert_contains "init: creating message" "Creating $F" "$OUT"
 assert_contains "init: shows current value as default" "[fake]:" "$OUT"
 assert_contains "init: invalid backend re-asked" "unknown backend 'nope'" "$OUT"
@@ -777,11 +784,209 @@ assert_contains "init: - is invalid for backend" "unknown backend '-'" "$OUT"
 assert_contains "init: - is invalid for max_rounds" "positive integer (got '-')" "$OUT"
 assert_eq "init: retry after - works" "5" "$(jq .max_rounds "$F")"
 OUT=$(cd "$R" && bash "$C" init --user --yes)
-assert_contains "init --yes: no prompts" "Wrote $HOME/.claude/review-loop.json" "$OUT"
-assert_eq "init --yes: keeps existing user value" "opus" "$(jq -r .model "$HOME/.claude/review-loop.json")"
-assert_eq "init --yes: existing file untouched for other keys" "null" "$(jq .max_rounds "$HOME/.claude/review-loop.json")"
-rm -f "$HOME/.claude/review-loop.json"
+assert_contains "init --yes: no prompts" "Wrote $HOME/.config/review-loop/config.json" "$OUT"
+assert_eq "init --yes: keeps existing user value" "opus" "$(jq -r .model "$HOME/.config/review-loop/config.json")"
+assert_eq "init --yes: existing file untouched for other keys" "null" "$(jq .max_rounds "$HOME/.config/review-loop/config.json")"
+rm -f "$HOME/.config/review-loop/config.json"
 assert_contains "unknown command" "unknown command" "$(cd "$R" && bash "$C" bogus 2>&1)"
+
+section "providers"
+R=$(new_repo r34); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
+cfg() { (cd "$R" && env "$@" bash "$S/config.sh" show --json | jq -c '{p: .provider, b: .effective.backend, m: .effective.model, r: .effective.max_rounds, d: .effective.dir}'); }
+mkdir -p "$HOME/.config/review-loop"
+echo '{"max_rounds": 4, "providers": {"claude": {"max_rounds": 6}, "codex": {"model": "o-reviewer"}}}' > "$HOME/.config/review-loop/config.json"
+assert_eq "user shared top-level applies to any provider" '{"p":null,"b":"fake","m":"","r":4,"d":".review-loop"}' "$(cfg REVIEW_LOOP_PROVIDER=none)"
+assert_eq "providers.claude section applies under claude" '{"p":"claude","b":"fake","m":"","r":6,"d":".review-loop"}' "$(cfg REVIEW_LOOP_PROVIDER=claude)"
+assert_eq "providers.codex section applies under codex" '{"p":"codex","b":"fake","m":"o-reviewer","r":4,"d":".review-loop"}' "$(cfg REVIEW_LOOP_PROVIDER=codex)"
+assert_eq "provider names are case-insensitive" '"claude"' "$(cd "$R" && REVIEW_LOOP_PROVIDER=Claude bash "$S/config.sh" show --json | jq .provider)"
+assert_eq "invalid provider name counts as unset (claude)" '"claude"' "$(cd "$R" && REVIEW_LOOP_PROVIDER='../x' bash "$S/config.sh" show --json | jq .provider)"
+assert_eq "auto-detect claude from CLAUDECODE" '"claude"' "$(cd "$R" && env -u REVIEW_LOOP_PROVIDER CLAUDECODE=1 bash "$S/config.sh" show --json | jq .provider)"
+assert_eq "plain shell defaults to claude" '"claude"' "$(cd "$R" && env -u REVIEW_LOOP_PROVIDER -u CLAUDECODE bash "$S/config.sh" show --json | jq .provider)"
+assert_eq "plain shell still reads legacy ~/.claude section values" '6' "$(cd "$R" && env -u REVIEW_LOOP_PROVIDER -u CLAUDECODE bash "$S/config.sh" show --json | jq .effective.max_rounds)"
+echo '{"max_rounds": 8}' > "$R/.review-loop.json"
+assert_eq "project shared beats user shared and its section" '{"p":"claude","b":"fake","m":"","r":8,"d":".review-loop"}' "$(cfg REVIEW_LOOP_PROVIDER=claude)"
+mkdir -p "$HOME/.claude"; echo '{"dir": "user-claude"}' > "$HOME/.claude/review-loop.json"
+assert_eq "user provider file beats user shared, below project shared" '{"p":"claude","b":"fake","m":"","r":8,"d":"user-claude"}' "$(cfg REVIEW_LOOP_PROVIDER=claude)"
+mkdir -p "$R/.claude" "$R/.codex"; echo '{"max_rounds": 9}' > "$R/.claude/review-loop.json"; echo '{"max_rounds": 2, "dir": "codex-loops"}' > "$R/.codex/review-loop.json"
+assert_eq "project provider file wins under claude" '{"p":"claude","b":"fake","m":"","r":9,"d":"user-claude"}' "$(cfg REVIEW_LOOP_PROVIDER=claude)"
+assert_eq "project provider file wins under codex" '{"p":"codex","b":"fake","m":"o-reviewer","r":2,"d":"codex-loops"}' "$(cfg REVIEW_LOOP_PROVIDER=codex)"
+assert_eq "provider files ignored with provider none" '{"p":null,"b":"fake","m":"","r":8,"d":".review-loop"}' "$(cfg REVIEW_LOOP_PROVIDER=none)"
+assert_eq "env still beats every file" '{"p":"claude","b":"fake","m":"","r":1,"d":"user-claude"}' "$(cfg REVIEW_LOOP_PROVIDER=claude REVIEW_LOOP_MAX_ROUNDS=1)"
+SHOW=$(cd "$R" && REVIEW_LOOP_PROVIDER=codex bash "$S/config.sh" show)
+assert_contains "show: set-by names the provider file" "max_rounds       2                      project codex" "$SHOW"
+assert_contains "show: set-by names the section" "model            o-reviewer             user shared (providers.codex)" "$SHOW"
+assert_contains "show: set-by names env" "backend          fake                   env REVIEW_LOOP_BACKEND" "$SHOW"
+assert_contains "show lists the codex files" "project codex    $R/.codex/review-loop.json (exists)" "$SHOW"
+start "$R" "t" > /dev/null; L=$(pointer "$R")
+assert_eq "start.sh resolves through the provider files" "9" "$(st "$L" max_rounds)"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+L=$(cd "$R" && REVIEW_LOOP_PROVIDER=codex bash "$S/start.sh" "t" > /dev/null && pointer "$R")
+assert_contains "start.sh under codex uses the codex dir" "/codex-loops/" "$L"
+(cd "$R" && REVIEW_LOOP_PROVIDER=codex bash "$S/cancel.sh" > /dev/null)
+# writing: section vs provider file vs shared
+rm -f "$R/.review-loop.json" "$R/.claude/review-loop.json" "$R/.codex/review-loop.json" "$HOME/.claude/review-loop.json"
+OUT=$(cd "$R" && bash "$C" set --provider codex backend=claude max_rounds=3)
+assert_contains "set --provider reports the section" "Updated $R/.review-loop.json (providers.codex)" "$OUT"
+assert_eq "set --provider writes the section" '{"backend":"claude","max_rounds":3}' "$(jq -c .providers.codex "$R/.review-loop.json")"
+(cd "$R" && bash "$C" set max_rounds=7 > /dev/null)
+assert_eq "set keeps the section intact" '3' "$(jq .providers.codex.max_rounds "$R/.review-loop.json")"
+assert_eq "set writes top-level" '7' "$(jq .max_rounds "$R/.review-loop.json")"
+OUT=$(cd "$R" && bash "$C" set --provider model=opus)
+assert_contains "set --provider defaults to the running provider" "(providers.claude)" "$OUT"
+assert_eq "set --provider claude section written" '"opus"' "$(jq .providers.claude.model "$R/.review-loop.json")"
+OUT=$(cd "$R" && bash "$C" set --provider-file codex dir=codex-loops)
+assert_contains "set --provider-file reports the file" "Updated $R/.codex/review-loop.json" "$OUT"
+assert_eq "set --provider-file writes plain keys" '{"dir":"codex-loops"}' "$(jq -c . "$R/.codex/review-loop.json")"
+(cd "$R" && bash "$C" set --provider-file model=sonnet > /dev/null)
+assert_eq "set --provider-file defaults to the running provider" '"sonnet"' "$(jq .model "$R/.claude/review-loop.json")"
+(cd "$R" && bash "$C" set --user --provider-file codex max_rounds=2 > /dev/null)
+assert_eq "set --user --provider-file writes ~/.codex" '2' "$(jq .max_rounds "$HOME/.codex/review-loop.json")"
+(cd "$R" && bash "$C" set --user --provider codex usage=true > /dev/null)
+assert_eq "set --user --provider writes the user shared section" 'true' "$(jq .providers.codex.usage "$HOME/.config/review-loop/config.json")"
+assert_eq "resolution under codex combines all of it (env backend, user section model, project section rounds, provider file dir)" '{"p":"codex","b":"fake","m":"o-reviewer","r":3,"d":"codex-loops"}' "$(cfg REVIEW_LOOP_PROVIDER=codex)"
+assert_eq "project section backend shows without the env override" '"claude"' "$(cd "$R" && env -u REVIEW_LOOP_BACKEND REVIEW_LOOP_PROVIDER=codex bash "$S/config.sh" show --json | jq .effective.backend)"
+(cd "$R" && bash "$C" unset --provider codex backend max_rounds > /dev/null)
+assert_eq "unset --provider empties the section" '{}' "$(jq -c .providers.codex "$R/.review-loop.json")"
+assert_eq "unset --provider leaves other sections" '"opus"' "$(jq .providers.claude.model "$R/.review-loop.json")"
+assert_contains "create --provider on an existing section" "already exists" "$(cd "$R" && bash "$C" create --provider codex)"
+OUT=$(cd "$R" && bash "$C" create --provider opencode)
+assert_contains "create --provider adds a new section" "Created $R/.review-loop.json (providers.opencode)" "$OUT"
+assert_eq "create --provider section is empty" '{}' "$(jq -c .providers.opencode "$R/.review-loop.json")"
+assert_contains "create --provider twice" "already exists" "$(cd "$R" && bash "$C" create --provider opencode)"
+assert_contains "create --provider-file" "Created $R/.opencode/review-loop.json" "$(cd "$R" && bash "$C" create --provider-file opencode)"
+assert_contains "provider none with no name is an error" "no provider given" "$(cd "$R" && env -u CLAUDECODE REVIEW_LOOP_PROVIDER=none bash "$C" set --provider max_rounds=1 2>&1 || true)"
+assert_contains "unset --provider KEY unsets for the running provider" "(providers.claude)" "$(cd "$R" && bash "$C" unset --provider model)"
+assert_eq "unset --provider KEY removed the key" 'null' "$(jq .providers.claude.model "$R/.review-loop.json")"
+(cd "$R" && bash "$C" set --provider Codex usage=false > /dev/null)
+assert_eq "explicit provider names are lower-cased" 'false' "$(jq .providers.codex.usage "$R/.review-loop.json")"
+assert_eq "no mixed-case section is created" 'null' "$(jq '.providers.Codex' "$R/.review-loop.json")"
+(cd "$R" && bash "$C" set --provider-file=CODEX dir=codex-loops > /dev/null)
+assert_file "explicit provider-file names are lower-cased" "$R/.codex/review-loop.json"
+assert_eq "provider dir stored lower-cased" "1" "$(ls -a "$R" | grep -c '^\.codex$')"
+assert_eq "no mixed-case provider dir" "0" "$(ls -a "$R" | grep -c '^\.CODEX$')"
+(cd "$R" && bash "$C" set --provider codex max_rounds=3 > /dev/null)
+J=$(cd "$R" && bash "$C" show --provider codex --json)
+assert_eq "show --provider reports that provider" '"codex"' "$(jq .provider <<< "$J")"
+assert_eq "show --provider resolves that provider's values from a claude session" '3' "$(jq .effective.max_rounds <<< "$J")"
+assert_eq "show --provider lists that provider's files" '"project codex"' "$(jq '[.files[] | select(.kind == "provider")][1].label' <<< "$J")"
+assert_contains "show --provider says it was selected" "provider: codex (selected with --provider)" "$(cd "$R" && bash "$C" show --provider codex)"
+OUT=$(cd "$R" && printf '
+
+
+
+
+
+
+
+
+n
+' | bash "$C" init --provider codex 2>&1)
+assert_contains "init --provider shows that provider's current value" "[3]:" "$OUT"
+assert_contains "init --provider labels the provider" "provider: codex" "$OUT"
+(cd "$R" && bash "$C" unset --provider codex max_rounds > /dev/null)
+assert_contains "none rejected as a section name" "'none' is not a provider" "$(cd "$R" && bash "$C" set --provider none max_rounds=1 2>&1 || true)"
+assert_contains "none rejected as a provider file" "'none' is not a provider" "$(cd "$R" && bash "$C" set --provider-file=None max_rounds=1 2>&1 || true)"
+assert_eq "none never creates a section" 'null' "$(jq '.providers.none' "$R/.review-loop.json")"
+assert_no_file "none never creates a provider dir" "$R/.none/review-loop.json"
+assert_contains "start.sh help shows the new precedence" "~/.config/review-loop/config.json" "$(bash "$S/start.sh" --help)"
+J=$(cd "$R" && bash "$C" show --provider --json)
+assert_eq "--provider followed by a flag: the flag is not a name" '"claude"' "$(jq .provider <<< "$J" 2>/dev/null)"
+assert_eq "--provider --json still produces JSON" '"section"' "$(jq .mode <<< "$J" 2>/dev/null)"
+OUT=$(cd "$R" && bash "$C" set --provider --user max_rounds=3 2>&1)
+assert_contains "--provider --user writes the user shared section" "Updated $HOME/.config/review-loop/config.json (providers.claude)" "$OUT"
+assert_eq "no providers.--user section" 'null' "$(jq '.providers["--user"]' "$R/.review-loop.json")"
+assert_eq "user shared section holds the value" '3' "$(jq .providers.claude.max_rounds "$HOME/.config/review-loop/config.json")"
+rm -f "$HOME/.config/review-loop/config.json"
+J=$(cd "$R" && bash "$C" show --provider-file --json)
+assert_eq "--provider-file --json: flag not taken as a name" '"file"' "$(jq .mode <<< "$J" 2>/dev/null)"
+assert_contains "--provider-file --user targets the user provider file" "$HOME/.claude/review-loop.json" "$(cd "$R" && bash "$C" show --provider-file --user --json | jq -r .target)"
+assert_contains "explicit name starting with - rejected" "invalid provider name '--json'" "$(cd "$R" && bash "$C" set --provider=--json max_rounds=1 2>&1 || true)"
+assert_contains "explicit provider-file name starting with - rejected" "invalid provider name '-x'" "$(cd "$R" && bash "$C" set --provider-file=-x max_rounds=1 2>&1 || true)"
+assert_eq "REVIEW_LOOP_PROVIDER starting with - counts as unset" '"claude"' "$(cd "$R" && REVIEW_LOOP_PROVIDER=--x bash "$S/config.sh" show --json | jq .provider)"
+assert_eq "names may contain - after the first character" '"open-code"' "$(cd "$R" && REVIEW_LOOP_PROVIDER=open-code bash "$S/config.sh" show --json | jq .provider)"
+NL=$'-x\nclaude'
+OUT=$(cd "$R" && bash "$C" show --provider "$NL" --json 2>&1); RC=$?
+assert_eq "positional multi-line value starting with - is not a name and fails" "1" "$RC"
+assert_contains "it is reported as a stray argument" "unexpected argument" "$OUT"
+assert_eq "no section from the multi-line positional value" 'null' "$(jq --arg k "$NL" '.providers[$k]' "$R/.review-loop.json")"
+assert_contains "explicit multi-line name rejected" "invalid provider name" "$(cd "$R" && bash "$C" set "--provider=$NL" max_rounds=1 2>&1 || true)"
+assert_contains "explicit multi-line provider-file name rejected" "invalid provider name" "$(cd "$R" && bash "$C" set "--provider-file=$NL" max_rounds=1 2>&1 || true)"
+assert_eq "no section from a multi-line name" 'null' "$(jq --arg k "$NL" '.providers[$k]' "$R/.review-loop.json")"
+assert_eq "multi-line REVIEW_LOOP_PROVIDER counts as unset" '"claude"' "$(cd "$R" && REVIEW_LOOP_PROVIDER="$NL" bash "$S/config.sh" show --json | jq .provider)"
+assert_eq "multi-line valid-looking tail is still rejected" '"claude"' "$(cd "$R" && REVIEW_LOOP_PROVIDER=$'codex\nx' bash "$S/config.sh" show --json | jq .provider)"
+valid() { (cd "$S" && bash -c '. ./lib.sh; rl_valid_provider_name "$1" && echo yes || echo no' _ "$1"); }
+assert_eq "helper: plain name" "yes" "$(valid codex)"
+assert_eq "helper: leading dash" "no" "$(valid -x)"
+assert_eq "helper: newline" "no" "$(valid $'a\nb')"
+assert_eq "helper: empty" "no" "$(valid '')"
+assert_eq "helper: uppercase is not valid before lower-casing" "no" "$(valid Codex)"
+BEFORE=$(jq -c '.providers.claude' "$R/.review-loop.json")
+OUT=$(cd "$R" && bash "$C" create --provider open.code 2>&1); RC=$?
+assert_eq "invalid positional name fails" "1" "$RC"
+assert_contains "invalid positional name explains" "invalid provider name 'open.code'" "$OUT"
+assert_eq "invalid positional name leaves providers.claude untouched" "$BEFORE" "$(jq -c '.providers.claude' "$R/.review-loop.json")"
+assert_eq "invalid positional name writes no section" 'null' "$(jq '.providers["open.code"]' "$R/.review-loop.json" 2>/dev/null)"
+assert_contains "invalid positional name with set fails" "invalid provider name 'Open.Code'" "$(cd "$R" && bash "$C" set --provider Open.Code max_rounds=1 2>&1 || true)"
+assert_contains "invalid positional provider-file name fails" "invalid provider name 'a b'" "$(cd "$R" && bash "$C" show --provider-file 'a b' 2>&1 || true)"
+assert_contains "--provider then KEY=VALUE still works" "(providers.claude)" "$(cd "$R" && bash "$C" set --provider max_rounds=2)"
+assert_contains "--provider then a config key still works for unset" "(providers.claude)" "$(cd "$R" && bash "$C" unset --provider max_rounds)"
+assert_contains "show rejects stray arguments" "unexpected argument 'extra'" "$(cd "$R" && bash "$C" show extra 2>&1 || true)"
+assert_contains "create rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" create --project stray 2>&1 || true)"
+assert_contains "gitignore rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" gitignore now 2>&1 || true)"
+assert_contains "bad provider name rejected" "invalid provider name" "$(cd "$R" && bash "$C" set --provider='bad name' max_rounds=1 2>&1 || true)"
+OUT=$(cd "$R" && printf '\n\n4\n\n\n\n\n\n\nn\n' | bash "$C" init --provider codex 2>&1)
+assert_contains "init --provider writes into the section" "Wrote $R/.review-loop.json (providers.codex)" "$OUT"
+assert_eq "init --provider value in section" '4' "$(jq .providers.codex.max_rounds "$R/.review-loop.json")"
+rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json" "$HOME/.codex"
+# legacy project with only .claude/review-loop.json: default writes go there, not to a masked shared file
+R=$(new_repo r35); mkdir -p "$R/.claude"; echo '{"max_rounds": 2}' > "$R/.claude/review-loop.json"
+OUT=$(cd "$R" && bash "$C" set max_rounds=4 2>&1)
+assert_contains "legacy project: writes go to the existing provider file" "Updated $R/.claude/review-loop.json" "$OUT"
+assert_contains "legacy project: explains the choice" "note: using the existing $R/.claude/review-loop.json" "$OUT"
+assert_eq "legacy project: the write takes effect" "4" "$(cd "$R" && bash "$C" show --json | jq .effective.max_rounds)"
+assert_no_file "legacy project: no shared file created" "$R/.review-loop.json"
+assert_contains "legacy project: show says where writes go" "writes go to: $R/.claude/review-loop.json" "$(cd "$R" && bash "$C" show)"
+J=$(cd "$R" && bash "$C" show --json)
+assert_eq "show json: mode switched to file" '"file"' "$(jq .mode <<< "$J")"
+assert_contains "show json: note present" "using the existing" "$(jq -r .note <<< "$J")"
+OUT=$(cd "$R" && bash "$C" set --project max_rounds=6 2>&1)
+assert_contains "explicit --project writes the shared file" "Updated $R/.review-loop.json" "$OUT"
+assert_contains "explicit --project warns about the mask" "warning: max_rounds=6 was written to $R/.review-loop.json but the effective value is 4, set by project claude" "$OUT"
+assert_eq "masked value stays masked" "4" "$(cd "$R" && bash "$C" show --json | jq .effective.max_rounds)"
+OUT=$(cd "$R" && bash "$C" set --project dir=loops 2>&1)
+assert_not_contains "unmasked key gets no warning" "warning:" "$OUT"
+OUT=$(cd "$R" && bash "$C" set max_rounds=7 2>&1)
+assert_contains "both files present: default is the shared file" "Updated $R/.review-loop.json" "$OUT"
+assert_contains "both files present: masked write warns" "effective value is 4, set by project claude" "$OUT"
+OUT=$(cd "$R" && printf '\n\n8\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "init warns about masked values too" "warning: max_rounds=8" "$OUT"
+rm -f "$R/.review-loop.json"
+mkdir -p "$HOME/.claude"; echo '{"model": "legacy"}' > "$HOME/.claude/review-loop.json"
+OUT=$(cd "$R" && bash "$C" set --user model=opus 2>&1)
+assert_contains "--user always writes the shared user file" "Updated $HOME/.config/review-loop/config.json" "$OUT"
+assert_contains "--user write masked by ~/.claude warns" "effective value is legacy, set by user claude" "$OUT"
+assert_eq "--user write landed in the shared user file" '"opus"' "$(jq .model "$HOME/.config/review-loop/config.json")"
+rm -f "$HOME/.config/review-loop/config.json"
+OUT=$(cd "$R" && bash "$C" create --user)
+assert_file "create --user makes the shared user file even with ~/.claude present" "$HOME/.config/review-loop/config.json"
+assert_contains "create --user reports the shared user file" "Created $HOME/.config/review-loop/config.json" "$OUT"
+rm -f "$HOME/.config/review-loop/config.json" "$HOME/.claude/review-loop.json"
+# init warns only about keys it wrote
+mkdir -p "$R/.claude"; echo '{"max_rounds": 2, "model": "m"}' > "$R/.claude/review-loop.json"
+OUT=$(cd "$R" && bash "$C" init --project --yes 2>&1)
+assert_not_contains "init --yes writes nothing, so no masking warnings" "warning:" "$OUT"
+OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\nn\n' | bash "$C" init --project 2>&1)
+assert_contains "init warns for the key it wrote" "warning: max_rounds=9" "$OUT"
+assert_eq "init warns only once" "1" "$(printf '%s\n' "$OUT" | grep -c '^warning:')"
+assert_not_contains "init does not warn for keys it did not write" "warning: model=" "$OUT"
+rm -f "$R/.claude/review-loop.json" "$R/.review-loop.json"
+J=$(cd "$R" && bash "$C" show --provider codex --json)
+assert_eq "section_exists false for a missing section" "false" "$(jq .section_exists <<< "$J")"
+(cd "$R" && bash "$C" create --provider codex > /dev/null)
+assert_eq "section_exists true after create" "true" "$(cd "$R" && bash "$C" show --provider codex --json | jq .section_exists)"
+assert_eq "section_exists for a shared target mirrors target_exists" "true" "$(cd "$R" && bash "$C" show --project --json | jq '.section_exists == .target_exists')"
+rm -f "$R/.review-loop.json"
+assert_eq "section_exists false for a missing shared file" "false" "$(cd "$R" && bash "$C" show --project --json | jq .section_exists)"
 
 section "round timings"
 R=$(new_repo r27)
