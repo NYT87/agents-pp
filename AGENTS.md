@@ -17,8 +17,8 @@ runtime deps are `jq` and optionally `git`.
 - `scripts/resume-hook.sh` — UserPromptSubmit hook; only ends a pause (`rl_resume_pause`), never blocks.
 - `scripts/backends/*.sh` — one reviewer CLI adapter each; contract in README "Backends".
 - `templates/*.md` — reviewer prompt and the file formats both agents must follow.
-- `scripts/dashboard.sh` + `templates/dashboard.html` — static dashboard generator (defaults from config `dashboard.{dirs,out,open,auto}`; `rl_finalize` regenerates it when `auto` is on); the template gets the loop data substituted into `{{DATA}}` (with `</` escaped) and renders everything client-side with no external resources.
-- `tests/test_loop.sh` — plain-bash suite driving the scripts with the `fake` backend.
+- `scripts/dashboard.sh` + `templates/dashboard.html` — static dashboard generator (defaults from config `dashboard.{dirs,out,open,auto}`; `rl_finalize` regenerates it when `auto` is on); the template gets the loop data substituted into `{{DATA}}` (with `</` escaped) and renders everything client-side with no external resources. `DATA.config` embeds `config.sh show --json` and `keys --json` for the Configuration panel; `--serve` runs an embedded python3 loopback server whose only write path is `config.sh set/unset` with a validated argv (no shell) and a per-run token.
+- `tests/test_loop.sh` — plain-bash suite driving the scripts with the `fake` backend; the Node and serve-mode sections skip when `node` / `python3` are missing.
 
 ## Rules
 

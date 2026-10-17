@@ -1,7 +1,7 @@
 ---
 name: review-dashboard
 description: Generate and open an HTML dashboard of all review loops in this project (outcomes, rounds, usage, and the full comment trail per loop).
-argument-hint: "[--dir DIR] [--out FILE] [--no-open]"
+argument-hint: "[--dir DIR] [--out FILE] [--no-open] [--serve [--port N]]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/dashboard.sh *)
@@ -18,4 +18,8 @@ With no arguments it reads everything from the config file (`dashboard.dirs`,
 page in the browser. Report where the page was written and how many loops it
 contains. The page is self-contained (no network needed) and can be
 regenerated at any time; with `"dashboard": {"auto": true}` in the config it is
-regenerated automatically whenever a loop ends.
+regenerated automatically whenever a loop ends. The page's Configuration
+panel lets the user edit the config: on the static page it shows the
+`config.sh` command to run (or saves the file via the browser); with `--serve`
+changes apply directly. `--serve` keeps running until Ctrl-C, so only use it
+when the user asks for it, and run it in the background.

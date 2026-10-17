@@ -69,7 +69,7 @@ The second hook only records when a paused loop resumes (so the coder time of a 
 
 ### Requirements
 
-- Claude Code CLI, `jq`, and `git` (optional: non-git projects work too).
+- Claude Code CLI, `jq`, and `git` (optional: non-git projects work too). `python3` only for `dashboard.sh --serve`.
 - A reviewer CLI: [Codex](https://github.com/openai/codex) (`npm install -g @openai/codex`) for the default backend, or Claude Code itself for `--backend claude`.
 
 ## Usage
@@ -139,7 +139,7 @@ Backends report usage through an optional sidecar file (see "Reviewer backends")
 
 ```
 /review-dashboard
-bash plugins/review-loop/skills/review-loop/scripts/dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open]
+bash plugins/review-loop/skills/review-loop/scripts/dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open] [--serve [--port N]]
 ```
 
 Generates a self-contained `dashboard.html` (default: inside the storage dir) from every loop folder it finds and opens it in your browser. With no arguments everything comes from the config files, so a bare `/review-dashboard` is enough:
@@ -155,7 +155,14 @@ Generates a self-contained `dashboard.html` (default: inside the storage dir) fr
 }
 ```
 
-`dirs` lists the folders to scan (default: the loop dir), `out` the page to write, `open` whether to launch the browser (default true), and `auto: true` regenerates the page every time a loop ends, so it is always current without running anything. Flags override the config; `REVIEW_LOOP_DASHBOARD_OPEN=0` and `REVIEW_LOOP_DASHBOARD_OUT` override it from the environment. No server, no network: the loop data is embedded in the page. It shows stat tiles (loops, approval rate, average rounds, tokens and cost when usage tracking is on), a rounds-per-loop chart with the cap marked, an output-tokens-per-loop chart split by coder and reviewer, a filterable table, and, on click, the full comment trail of a loop round by round: coder summary beside the review, verdict, blocking count, usage, and the final summary. It follows the system light/dark setting and has a theme toggle.
+`dirs` lists the folders to scan (default: the loop dir), `out` the page to write, `open` whether to launch the browser (default true), and `auto: true` regenerates the page every time a loop ends, so it is always current without running anything.
+
+#### Editing the configuration from the dashboard
+
+The page has a Configuration panel showing every setting with its effective value and where it comes from (the same information as `config.sh show`). Edit values, pick where to write (project or user shared file, a provider section, or a provider file), and then:
+
+- **Static page** (the default): the panel shows the exact `config.sh` command for your changes (copy it), or saves the file through the browser. In Chromium browsers the file picker re-reads the chosen file and merges your changes into it without touching anything else (number literals included); elsewhere only a new file can be downloaded, and existing files are edited through the command. Nothing is written until you run the command or save the file.
+- **Served page**: `dashboard.sh --serve [--port 8765]` (needs `python3`) serves the dashboard on `127.0.0.1` only and adds an Apply button that writes through `config.sh`, so all validation, masking warnings and provider rules apply, and the page reloads with fresh data. Requests must carry the per-run token embedded in the page, keys and provider names are validated before anything runs, and no shell is involved. The server runs until Ctrl-C. Flags override the config; `REVIEW_LOOP_DASHBOARD_OPEN=0` and `REVIEW_LOOP_DASHBOARD_OUT` override it from the environment. No server, no network: the loop data is embedded in the page. It shows stat tiles (loops, approval rate, average rounds, tokens and cost when usage tracking is on), a rounds-per-loop chart with the cap marked, an output-tokens-per-loop chart split by coder and reviewer, a filterable table, and, on click, the full comment trail of a loop round by round: coder summary beside the review, verdict, blocking count, usage, and the final summary. It follows the system light/dark setting and has a theme toggle.
 
 ## Configuration
 
@@ -170,7 +177,7 @@ The loop can be driven by different coder providers (Claude Code today; Codex or
   ```
 - **One file per provider**, plain keys only: `./.<provider>/review-loop.json` or `~/.<provider>/review-loop.json`, for example `.claude/review-loop.json` (which is also where earlier versions kept the config, so existing files keep working) or `.codex/review-loop.json`.
 
-The running provider is `REVIEW_LOOP_PROVIDER` when set (`none` disables provider files and sections), otherwise `claude`, so a plain shell behaves like Claude Code and keeps reading existing `.claude/review-loop.json` files; a Codex or other provider's instructions export `REVIEW_LOOP_PROVIDER=codex`. An explicit `--provider NAME` or `--provider-file NAME` also selects whose values `config.sh show` and `init` report, so you can configure Codex from a Claude session. When you give no scope flag at all and the project's shared file does not exist yet but your provider's own project file does (a project that already has `.claude/review-loop.json`), `config.sh` edits that file and says so; every explicit flag, including `--user`, targets exactly the file it names. Whenever a value you write is masked by a higher-precedence source, it warns and names the file that sets the effective value. Precedence, highest first: flags → `REVIEW_LOOP_*` env → project provider file → project shared file (its `providers.<name>` section over its top-level keys) → user provider file → user shared file → defaults. Values are frozen into `state.json` when a loop starts.
+The running provider is `REVIEW_LOOP_PROVIDER` when set (`none` disables provider files and sections), otherwise `claude`, so a plain shell behaves like Claude Code and keeps reading existing `.claude/review-loop.json` files; a Codex or other provider's instructions export `REVIEW_LOOP_PROVIDER=codex`. An explicit `--provider NAME` or `--provider-file NAME` also selects whose values `config.sh show` and `init` report, so you can configure Codex from a Claude session. When you give no scope flag at all and the project's shared file does not exist yet but your provider's own project file does (a project that already has `.claude/review-loop.json`), `config.sh` edits that file and says so; every explicit flag, including `--user`, targets exactly the file it names. Whenever a value you write is masked by a higher-precedence source, it warns and names the file that sets the effective value. Precedence, highest first: flags → `REVIEW_LOOP_*` env → project provider file → project shared file (its `providers.<name>` section over its top-level keys) → user provider file → user shared file → defaults. Values are frozen into `state.json` when a loop starts. A file that is not a JSON object, or a `providers` value that is not an object, is ignored rather than breaking resolution, and a key set to `null` never overrides a value from a lower-precedence file.
 
 The quickest way to set things up is the wizard:
 
@@ -203,7 +210,7 @@ With `dir` set to the project root (`.`), `gitignore` writes a pattern matching 
 |---|---|---|---|---|
 | Reviewer backend | `--backend` | `REVIEW_LOOP_BACKEND` | `backend` | `codex` |
 | Reviewer model | `--model` | `REVIEW_LOOP_MODEL` | `model` | backend default |
-| Max review rounds | `--max-rounds` | `REVIEW_LOOP_MAX_ROUNDS` | `max_rounds` | `5` |
+| Max review rounds | `--max-rounds` | `REVIEW_LOOP_MAX_ROUNDS` | `max_rounds` | `5` (1 to 9007199254740991) |
 | Storage dir | `--dir` | `REVIEW_LOOP_DIR` | `dir` | `.review-loop` |
 | Usage tracking | `--usage` / `--no-usage` | `REVIEW_LOOP_USAGE` | `usage` | `false` |
 | Dashboard | `--dir` / `--out` / `--open` | `REVIEW_LOOP_DASHBOARD_OPEN`, `REVIEW_LOOP_DASHBOARD_OUT` | `dashboard.{dirs,out,open,auto}` | loop dir, `<dir>/dashboard.html`, `true`, `false` |

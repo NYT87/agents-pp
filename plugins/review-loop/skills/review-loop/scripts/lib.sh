@@ -234,17 +234,25 @@ rl_config_files() {
 # section), REVIEW_LOOP_* env. Flags are applied by start.sh.
 rl_resolve_config() {
   local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false}}'
-  local cfg="$defaults" env_cfg label path kind file_cfg p
+  local cfg="$defaults" env_cfg label path kind file_cfg p merged
   p=$(rl_provider)
   while IFS=$'\t' read -r label path kind; do
     [ -f "$path" ] || continue
-    file_cfg=$(jq -c . "$path" 2>/dev/null) || continue
+    # A file that is not a JSON object is ignored, like unparsable JSON. Null
+    # values are dropped so a "key": null in a higher-precedence file does not
+    # wipe a value set below it. A malformed "providers" (not an object, or a
+    # section that is not an object) is ignored rather than breaking resolution.
+    file_cfg=$(jq -c 'select(type == "object")
+      | walk(if type == "object" then with_entries(select(.value != null)) else . end)' "$path" 2>/dev/null) || continue
+    [ -n "$file_cfg" ] || continue
     if [ "$kind" = "shared" ]; then
-      cfg=$(jq -cn --argjson a "$cfg" --argjson b "$file_cfg" --arg p "$p" \
-        '$a * ($b | del(.providers)) * (if $p != "" then (($b.providers // {})[$p] // {}) else {} end)')
+      merged=$(jq -cn --argjson a "$cfg" --argjson b "$file_cfg" --arg p "$p" \
+        '$a * ($b | del(.providers))
+         * (if $p != "" then ((($b.providers // {}) | objects // {})[$p] // {} | objects // {}) else {} end)' 2>/dev/null) || continue
     else
-      cfg=$(jq -cn --argjson a "$cfg" --argjson b "$file_cfg" '$a * ($b | del(.providers))')
+      merged=$(jq -cn --argjson a "$cfg" --argjson b "$file_cfg" '$a * ($b | del(.providers))' 2>/dev/null) || continue
     fi
+    [ -n "$merged" ] && cfg="$merged"
   done < <(rl_config_files)
   env_cfg=$(jq -n \
     --arg dir "${REVIEW_LOOP_DIR:-}" \
@@ -279,9 +287,9 @@ rl_config_source() {
   if [ -n "$envname" ] && [ -n "$(eval "printf '%s' \"\${$envname:-}\"")" ]; then echo "env $envname"; return 0; fi
   while IFS=$'\t' read -r label path kind; do
     [ -f "$path" ] || continue
-    if [ "$kind" = "shared" ] && [ -n "$p" ] && [ "$(jq -r --arg p "$p" --arg k "$key" '(.providers // {})[$p] // {} | getpath($k | split(".")) != null' "$path" 2>/dev/null)" = "true" ]; then
+    if [ "$kind" = "shared" ] && [ -n "$p" ] && [ "$(jq -r --arg p "$p" --arg k "$key" 'select(type == "object") | (((.providers // {}) | objects // {})[$p] // {} | objects // {}) | getpath($k | split(".")) != null' "$path" 2>/dev/null)" = "true" ]; then
       result="$label (providers.$p)"
-    elif [ "$(jq -r --arg k "$key" 'del(.providers) | getpath($k | split(".")) != null' "$path" 2>/dev/null)" = "true" ]; then
+    elif [ "$(jq -r --arg k "$key" 'select(type == "object") | del(.providers) | getpath($k | split(".")) != null' "$path" 2>/dev/null)" = "true" ]; then
       result="$label"
     fi
   done < <(rl_config_files)

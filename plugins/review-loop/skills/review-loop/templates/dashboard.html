@@ -97,6 +97,28 @@
   .md .cid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface); padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); }
   .md blockquote { border-left: 3px solid var(--axis); margin: 6px 0; padding-left: 10px; color: var(--ink-2); }
   .usage-table { margin-top: 10px; }
+  /* configuration panel */
+  .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px 18px; margin: 10px 0; }
+  .cfg-row { display: grid; grid-template-columns: 1fr; gap: 3px; }
+  .cfg-row label { font-size: 13px; }
+  .cfg-row .src { color: var(--muted); font-size: 11px; }
+  .cfg-row input[type=text], .cfg-row input[type=number], .cfg-row select { width: 100%; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+  .cfg-row.changed label { color: var(--s1); font-weight: 600; }
+  .cfg-row.removed label { color: var(--critical); text-decoration: line-through; }
+  .cfg-row .err { color: var(--critical); }
+  .cfg-row .tools { float: right; }
+  button.mini { font-size: 11px; padding: 0 6px; margin-left: 4px; }
+  .cfg-row .check { display: flex; align-items: center; gap: 8px; }
+  .cfg-scope { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; color: var(--ink-2); margin: 6px 0 4px; }
+  .cfg-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .cfg-actions button.primary { background: var(--s1); color: #fff; border-color: transparent; }
+  .cfg-actions button.primary:hover { opacity: .9; }
+  .cfg-actions button[disabled] { opacity: .5; cursor: default; }
+  pre.cmd { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
+  .cfg-out { font-size: 12px; white-space: pre-wrap; margin-top: 8px; color: var(--ink-2); }
+  .cfg-out.ok { color: var(--good); } .cfg-out.err { color: var(--critical); }
+  details.cfg-files { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+  details.cfg-files code { font-size: 11px; }
   @media (max-width: 640px) { .task { max-width: 200px; } th.opt, td.opt { display: none; } }
 </style>
 </head>
@@ -136,6 +158,17 @@
       <div class="legend"><span><i style="background:var(--s1)"></i>coder</span><span><i style="background:var(--s2)"></i>reviewer</span></div>
       <div id="chart-tokens"></div>
     </div>
+  </div>
+
+  <div class="card" id="card-config">
+    <h2>Configuration</h2>
+    <div class="hint" id="cfg-hint"></div>
+    <div class="cfg-scope" id="cfg-scope"></div>
+    <div class="cfg-grid" id="cfg-grid"></div>
+    <div class="cfg-actions" id="cfg-actions"></div>
+    <pre class="cmd" id="cfg-cmd"></pre>
+    <div class="cfg-out" id="cfg-out"></div>
+    <details class="cfg-files" id="cfg-files"></details>
   </div>
 
   <div class="card">
@@ -219,7 +252,127 @@ var RL = (function () {
   // Chart value in minutes, floored to a tenth so a bar never exceeds the
   // seconds it represents (a partial coder bar is a lower bound).
   const minutesFloor = s => Math.floor((s || 0) / 6) / 10;
-  return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor };
+  // Configuration editing helpers (pure). A change set is {set: {key: rawString}, unset: [key]}.
+  const getPath = (o, key) => key.split('.').reduce((x, p) => (x == null ? undefined : x[p]), o);
+  const toRaw = (type, v) => v == null ? '' : type === 'list' ? (Array.isArray(v) ? v.join(',') : String(v)) : String(v);
+  const scopeFlags = sc => {
+    const f = ['--' + (sc.scope === 'user' ? 'user' : 'project')];
+    if (sc.mode === 'section') f.push('--provider=' + sc.provider);
+    if (sc.mode === 'file') f.push('--provider-file=' + sc.provider);
+    return f;
+  };
+  const shq = v => /^[A-Za-z0-9_.,\/=:-]*$/.test(v) ? v : "'" + String(v).replace(/'/g, "'\\''") + "'";
+  // Same rules as config.sh coerce(): '' when valid, else the problem.
+  function validateValue(k, raw, backends) {
+    raw = String(raw == null ? '' : raw);
+    switch (k.type) {
+      case 'integer':
+        if (!/^[1-9][0-9]*$/.test(raw)) return `${k.key} must be a positive integer`;
+        // Same bound as config.sh (2^53 - 1): larger values cannot be stored exactly.
+        return (raw.length < 16 || (raw.length === 16 && raw <= '9007199254740991')) ? '' : `${k.key} is too large (max 9007199254740991)`;
+      case 'boolean': return /^(1|true|yes|y|on|0|false|no|n|off)$/i.test(raw) ? '' : `${k.key} must be true or false`;
+      case 'list': return '';
+      default:
+        if (k.key === 'backend') return (backends || []).includes(raw) ? '' : `unknown backend '${raw}'`;
+        if (k.key === 'dir' && raw === '') return 'dir cannot be empty';
+        return '';
+    }
+  }
+  const coerceValue = (type, v) => type === 'integer' ? parseInt(v, 10) : type === 'boolean' ? /^(1|true|yes|y|on)$/i.test(v) : type === 'list' ? String(v).split(',').map(x => x.trim()).filter(Boolean) : String(v);
+  // The exact config.sh command(s) for a change set, or '' when nothing changed.
+  function buildCommand(script, sc, changes) {
+    const out = [];
+    const sets = Object.keys(changes.set || {});
+    if (sets.length) out.push(['bash', shq(script), 'set', ...scopeFlags(sc), ...sets.map(k => shq(k + '=' + changes.set[k]))].join(' '));
+    if ((changes.unset || []).length) out.push(['bash', shq(script), 'unset', ...scopeFlags(sc), ...changes.unset.map(shq)].join(' '));
+    return out.join('\n');
+  }
+  // Changes = keys the user edited (form differs from the initial effective
+  // value) plus keys explicitly forced ("write" even when equal), minus keys
+  // marked for removal, which become unsets.
+  function diffConfig(keys, effective, form, opts) {
+    const force = new Set((opts && opts.force) || []), remove = new Set((opts && opts.remove) || []);
+    const set = {}, unset = [];
+    for (const k of keys) {
+      if (remove.has(k.key)) { unset.push(k.key); continue; }
+      const cur = toRaw(k.type, getPath(effective, k.key));
+      const now = form[k.key];
+      if (now == null) continue;
+      if (String(now) !== cur || force.has(k.key)) set[k.key] = String(now);
+    }
+    return { set, unset };
+  }
+  // Apply a change set to a file's JSON (client-side mirror of config.sh set/unset):
+  // values are coerced by type, unsets remove the key and prune empty containers.
+  function applyToFile(fileValues, section, changes, keys) {
+    const types = Object.fromEntries(keys.map(k => [k.key, k.type]));
+    const doc = JSON.parse(JSON.stringify(fileValues || {}));
+    let target = doc;
+    for (const p of section || []) { target[p] = (target[p] && typeof target[p] === 'object') ? target[p] : {}; target = target[p]; }
+    for (const k of Object.keys(changes.set || {})) {
+      const parts = k.split('.'); let o = target;
+      for (const p of parts.slice(0, -1)) { o[p] = (o[p] && typeof o[p] === 'object') ? o[p] : {}; o = o[p]; }
+      o[parts[parts.length - 1]] = coerceValue(types[k], changes.set[k]);
+    }
+    // Unset: delete the key, then remove only the containers on ITS path that
+    // this deletion left empty (section included). Unrelated empty objects
+    // elsewhere in the file are left exactly as they were.
+    for (const k of changes.unset || []) {
+      const full = [...(section || []), ...k.split('.')];
+      const chain = [doc]; let o = doc, ok = true;
+      for (const p of full.slice(0, -1)) { if (!o || typeof o[p] !== 'object' || Array.isArray(o[p])) { ok = false; break; } o = o[p]; chain.push(o); }
+      if (!ok) continue;
+      delete o[full[full.length - 1]];
+      for (let i = chain.length - 1; i > 0; i--) {
+        if (Object.keys(chain[i]).length) break;
+        delete chain[i - 1][full[i - 1]];
+      }
+    }
+    return doc;
+  }
+  // Lossless JSON round-trip: number literals outside strings are swapped for
+  // marker strings before JSON.parse, so JavaScript never converts them, and
+  // restored verbatim by the matching stringify. The marker carries a random
+  // nonce chosen per call and verified to be absent from the file text, so no
+  // existing string can ever be mistaken for a marker. Numbers the page writes
+  // itself are ordinary numbers.
+  function losslessJSON(text, candidates) {
+    const rnd = () => {
+      if (candidates && candidates.length) return candidates.shift();
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) { const a = new Uint8Array(12); crypto.getRandomValues(a); return Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); }
+      return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+    };
+    // The nonce must be absent from the raw text AND from every decoded string
+    // and key: a string can spell characters through JSON escapes (\u0030 for
+    // "0"), so the raw text alone is not enough. JSON.parse here is only used
+    // to enumerate strings; it throws on invalid JSON, as it should.
+    const decoded = [];
+    (function walk(v) {
+      if (typeof v === 'string') decoded.push(v);
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') for (const k of Object.keys(v)) { decoded.push(k); walk(v[k]); }
+    })(JSON.parse(text));
+    const taken = n => text.includes(n) || decoded.some(x => x.includes(n));
+    let nonce = rnd();
+    while (taken(nonce)) nonce = rnd();
+    const mark = 'n' + nonce + ':';
+    let out = '', i = 0, inStr = false;
+    while (i < text.length) {
+      const c = text[i];
+      if (inStr) { out += c; if (c === '\\') { out += text[i + 1] || ''; i += 2; continue; } if (c === '"') inStr = false; i++; continue; }
+      if (c === '"') { inStr = true; out += c; i++; continue; }
+      if (/[-0-9]/.test(c)) {
+        const m = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/.exec(text.slice(i));
+        if (m) { out += JSON.stringify(mark + m[0]); i += m[0].length; continue; }
+      }
+      out += c; i++;
+    }
+    const doc = JSON.parse(out);
+    const re = new RegExp('"' + mark + '(-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"', 'g');
+    const stringify = d => JSON.stringify(d, null, 2).replace(re, '$1');
+    return { doc, stringify, nonce };
+  }
+  return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
 </script>
@@ -387,6 +540,157 @@ if (typeof module !== 'undefined') module.exports = RL;
     renderDetail();
   }
 
+  // ── configuration panel ──────────────────────────────────────────────────
+  const CFG = DATA.config || {};
+  const cfgState = { scope: 'project', mode: 'shared', provider: '', form: {}, initial: {}, force: new Set(), remove: new Set() };
+  function cfgInit() {
+    const show = CFG.show;
+    if (!show) { $('#cfg-hint').textContent = 'Configuration unavailable (config.sh could not run when the page was generated).'; return; }
+    cfgState.provider = show.provider || 'claude';
+    cfgState.scope = show.scope || 'project'; cfgState.mode = show.mode || 'shared';
+    cfgState.force = new Set(); cfgState.remove = new Set();
+    for (const k of CFG.keys || []) { cfgState.form[k.key] = RL.toRaw(k.type, RL.getPath(show.effective, k.key)); cfgState.initial[k.key] = cfgState.form[k.key]; }
+    cfgRender();
+  }
+  const srcOf = key => ((CFG.show || {}).sources || {})[key] || 'default';
+  const sectionOf = sc => sc.mode === 'section' ? ['providers', sc.provider] : [];
+  // The file the current scope writes to, with its known contents (from the
+  // running provider's files, or any other provider's existing file).
+  function cfgTargetFile() {
+    const sc = cfgState, show = CFG.show, scope = sc.scope === 'user' ? 'user' : 'project';
+    const label = scope + (sc.mode === 'file' ? ' ' + sc.provider : ' shared');
+    let f = (show.files || []).find(x => x.label === label);
+    if (!f && sc.mode === 'file') f = (CFG.provider_files || []).find(x => x.scope === scope && x.provider === sc.provider);
+    if (f) return Object.assign({ known: true }, f);
+    const base = scope === 'user' ? (CFG.home || '~') : DATA.root;
+    return { label, known: false, exists: false, values: {},
+      path: sc.mode === 'file' ? `${base}/.${sc.provider}/review-loop.json` : (scope === 'user' ? (CFG.user_shared || '~/.config/review-loop/config.json') : `${base}/.review-loop.json`) };
+  }
+  const targetHas = key => { const f = cfgTargetFile(); return RL.getPath(RL.getPath(f.values, sectionOf(cfgState).join('.')) ?? (sectionOf(cfgState).length ? undefined : f.values), key) !== undefined; };
+  const targetValue = (k) => { const f = cfgTargetFile(); const sec = sectionOf(cfgState); const base = sec.length ? RL.getPath(f.values, sec.join('.')) : f.values; return RL.getPath(base, k.key); };
+  function cfgRender() {
+    const sc = cfgState, show = CFG.show;
+    $('#cfg-hint').textContent = DATA.serve
+      ? `Edit values and press Apply: changes are written through config.sh (provider "${show.provider || 'none'}"). Each value shows where it comes from; a value set by a higher-precedence file masks what you write, and config.sh warns about that.`
+      : `Edit values, then copy the command or save the file. This is a static page: nothing is written until you run the command or save. Run "dashboard.sh --serve" to apply changes directly with validation.`;
+    $('#cfg-scope').innerHTML = `
+      <label>Write to <select id="cfg-scope-sel">
+        <option value="project|shared">project shared file</option>
+        <option value="user|shared">user shared file</option>
+        <option value="project|section">project file, section of provider</option>
+        <option value="user|section">user file, section of provider</option>
+        <option value="project|file">project file of provider</option>
+        <option value="user|file">user file of provider</option>
+      </select></label>
+      <label style="${sc.mode === 'shared' ? 'display:none' : ''}">Provider <input type="text" id="cfg-provider" value="${esc(sc.provider)}" size="10"></label>
+      <span class="mono" id="cfg-target"></span>`;
+    $('#cfg-scope-sel').value = sc.scope + '|' + sc.mode;
+    $('#cfg-scope-sel').onchange = e => { [sc.scope, sc.mode] = e.target.value.split('|'); sc.force.clear(); sc.remove.clear(); cfgRender(); };
+    const pi = $('#cfg-provider'); if (pi) pi.oninput = e => { sc.provider = e.target.value.trim().toLowerCase(); sc.force.clear(); sc.remove.clear(); cfgRenderRows(); cfgUpdate(); };
+    cfgRenderRows();
+    const canFs = typeof window.showSaveFilePicker === 'function';
+    $('#cfg-actions').innerHTML = (DATA.serve ? `<button type="button" class="primary" id="cfg-apply">Apply</button>` : '')
+      + `<button type="button" id="cfg-copy">Copy command</button>`
+      + `<button type="button" id="cfg-save" title="${canFs ? 'merge into the chosen file' : 'download a new file; existing files need the command'}">${canFs ? 'Save file…' : 'Download new file'}</button>`
+      + `<button type="button" id="cfg-reset">Reset</button>`;
+    $('#cfg-apply') && ($('#cfg-apply').onclick = cfgApply);
+    $('#cfg-copy').onclick = () => { const c = $('#cfg-cmd').textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => cfgOut('command copied', 'ok'), () => cfgOut('copy failed; select the command and copy it manually', 'err')); };
+    $('#cfg-save').onclick = cfgSave;
+    $('#cfg-reset').onclick = () => { cfgInit(); cfgOut('', ''); };
+    const files = (show.files || []).map(f => `<li><code>${esc(f.path)}</code> (${f.label}, ${f.exists ? 'exists' : 'missing'})</li>`).join('')
+      + (CFG.provider_files || []).filter(f => f.provider !== show.provider).map(f => `<li><code>${esc(f.path)}</code> (${f.label}, other provider)</li>`).join('');
+    $('#cfg-files').innerHTML = `<summary>Files consulted, lowest precedence first · provider: ${esc(show.provider || 'none')}</summary><ul>${files}</ul>`;
+    cfgUpdate();
+  }
+  function cfgRenderRows() {
+    const sc = cfgState;
+    $('#cfg-grid').innerHTML = (CFG.keys || []).map(k => {
+      const v = sc.form[k.key] ?? '';
+      const removed = sc.remove.has(k.key);
+      let input;
+      if (k.key === 'backend') input = `<select data-key="${k.key}" ${removed ? 'disabled' : ''}>${(CFG.backends || []).map(b => `<option ${b === v ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(v) ? '' : `<option selected>${esc(v)}</option>`}</select>`;
+      else if (k.type === 'boolean') input = `<span class="check"><input type="checkbox" data-key="${k.key}" ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}> <span>${/^(1|true|yes|y|on)$/i.test(v) ? 'on' : 'off'}</span></span>`;
+      else if (k.type === 'integer') input = `<input type="number" min="1" step="1" data-key="${k.key}" value="${esc(v)}" ${removed ? 'disabled' : ''}>`;
+      else input = `<input type="text" data-key="${k.key}" value="${esc(v)}" placeholder="${k.type === 'list' ? 'comma-separated' : ''}" ${removed ? 'disabled' : ''}>`;
+      const inTarget = targetHas(k.key);
+      const tv = inTarget ? RL.toRaw(k.type, targetValue(k)) : null;
+      const tools = `<span class="tools">`
+        + (inTarget ? `<button type="button" class="mini" data-unset="${k.key}" title="remove ${k.key} from the target file so it is inherited again">${removed ? 'keep' : 'unset'}</button>` : '')
+        + `<button type="button" class="mini" data-force="${k.key}" title="write this value to the target even if it equals the effective value" style="${(sc.form[k.key] === sc.initial[k.key] && !removed) ? '' : 'display:none'}">${sc.force.has(k.key) ? 'writing' : 'write'}</button>`
+        + `</span>`;
+      const tgt = inTarget ? ` · in target: ${esc(tv === '' ? '(empty)' : tv)}` : ' · not in target';
+      return `<div class="cfg-row" data-row="${k.key}"><label title="${esc(k.help)}">${esc(k.key)} <span class="src">· ${esc(srcOf(k.key))}${tgt}</span></label>${input}<div class="src"><span class="err" data-err="${k.key}"></span>${esc(k.help)} ${tools}</div></div>`;
+    }).join('');
+    $('#cfg-grid').querySelectorAll('[data-key]').forEach(el => {
+      const h = () => { sc.form[el.dataset.key] = el.type === 'checkbox' ? String(el.checked) : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; const fb = $(`[data-force="${el.dataset.key}"]`); if (fb) fb.style.display = sc.form[el.dataset.key] === sc.initial[el.dataset.key] ? '' : 'none'; cfgUpdate(); };
+      el.oninput = h; el.onchange = h;
+    });
+    $('#cfg-grid').querySelectorAll('[data-unset]').forEach(b => b.onclick = () => { const k = b.dataset.unset; if (sc.remove.has(k)) sc.remove.delete(k); else { sc.remove.add(k); sc.force.delete(k); } cfgRenderRows(); cfgUpdate(); });
+    $('#cfg-grid').querySelectorAll('[data-force]').forEach(b => b.onclick = () => { const k = b.dataset.force; if (sc.force.has(k)) sc.force.delete(k); else sc.force.add(k); b.textContent = sc.force.has(k) ? 'writing' : 'write'; cfgUpdate(); });
+  }
+  function cfgChanges() { return RL.diffConfig(CFG.keys || [], CFG.show.effective || {}, cfgState.form, { force: [...cfgState.force], remove: [...cfgState.remove] }); }
+  function cfgErrors(ch) {
+    const errs = {};
+    for (const k of CFG.keys || []) if (k.key in ch.set) { const e = RL.validateValue(k, ch.set[k.key], CFG.backends); if (e) errs[k.key] = e; }
+    return errs;
+  }
+  function cfgUpdate() {
+    const sc = cfgState, ch = cfgChanges(), n = Object.keys(ch.set).length + ch.unset.length;
+    const errs = cfgErrors(ch), bad = sc.mode !== 'shared' && !/^[a-z0-9][a-z0-9_-]*$/.test(sc.provider || '') || sc.provider === 'none';
+    (CFG.keys || []).forEach(k => {
+      const row = $(`[data-row="${k.key}"]`); if (!row) return;
+      row.classList.toggle('changed', k.key in ch.set || ch.unset.includes(k.key));
+      row.classList.toggle('removed', ch.unset.includes(k.key));
+      const e = $(`[data-err="${k.key}"]`); if (e) e.textContent = errs[k.key] ? errs[k.key] + ' · ' : '';
+    });
+    const t = cfgTargetFile(); const tgt = $('#cfg-target'); if (tgt) tgt.textContent = t.path + (t.exists ? '' : ' (new file)');
+    const errText = Object.values(errs)[0];
+    $('#cfg-cmd').textContent = !n ? '# no changes' : bad ? '# enter a valid provider name' : errText ? '# fix: ' + errText : RL.buildCommand(CFG.script, sc, ch);
+    const ok = n > 0 && !bad && !errText;
+    const ap = $('#cfg-apply'); if (ap) ap.disabled = !ok;
+    $('#cfg-save').disabled = !ok || (!canPick() && t.exists);
+    $('#cfg-copy').disabled = !ok;
+  }
+  function cfgOut(text, cls) { const o = $('#cfg-out'); o.textContent = text; o.className = 'cfg-out ' + (cls || ''); }
+  async function cfgApply() {
+    const ch = cfgChanges(); if (!Object.keys(ch.set).length && !ch.unset.length) return;
+    const sc = cfgState;
+    cfgOut('applying…', '');
+    try {
+      const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RL-Token': DATA.serve.token },
+        body: JSON.stringify({ scope: sc.scope, mode: sc.mode, provider: sc.mode === 'shared' ? null : sc.provider, set: ch.set, unset: ch.unset }) });
+      const j = await r.json();
+      cfgOut(j.output || (j.ok ? 'done' : 'failed'), j.ok ? 'ok' : 'err');
+      if (j.ok) setTimeout(() => location.reload(), 900);
+    } catch (e) { cfgOut('request failed: ' + e, 'err'); }
+  }
+  // Save file: merge the change set into the target's CURRENT contents. With the
+  // file picker the chosen file is re-read and round-tripped losslessly (number
+  // literals untouched), so edits never alter what the page did not change.
+  // Without the picker the browser cannot read the existing file, so only a new
+  // file can be downloaded; for an existing one the command is the safe path.
+  const canPick = () => typeof window.showSaveFilePicker === 'function';
+  async function cfgSave() {
+    const sc = cfgState, f = cfgTargetFile(), ch = cfgChanges(), section = sectionOf(sc);
+    if (Object.values(cfgErrors(ch)).length) return;
+    const name = f.path.split('/').pop();
+    if (canPick()) {
+      try {
+        const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+        let lj;
+        try { const txt = await (await h.getFile()).text(); lj = RL.losslessJSON(txt.trim() ? txt : '{}'); } catch (e) { cfgOut('the chosen file is not valid JSON; not overwriting it', 'err'); return; }
+        if (!lj.doc || typeof lj.doc !== 'object' || Array.isArray(lj.doc)) { cfgOut('the chosen file does not hold a JSON object; not overwriting it', 'err'); return; }
+        const doc = RL.applyToFile(lj.doc, section, ch, CFG.keys || []);
+        const w = await h.createWritable(); await w.write(lj.stringify(doc) + '\n'); await w.close();
+        cfgOut(`saved ${h.name} (merged into its current contents). Make sure it is ${f.path} so config.sh and the loop read it.`, 'ok'); return;
+      } catch (e) { if (e && e.name === 'AbortError') return; cfgOut('save failed: ' + e, 'err'); return; }
+    }
+    if (f.exists) { cfgOut(`${f.path} already exists and this browser cannot re-read it safely; run the command above instead (it merges through config.sh).`, 'err'); return; }
+    const doc = RL.applyToFile({}, section, ch, CFG.keys || []);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' })); a.download = name; a.click();
+    cfgOut(`downloaded ${name}; move it to ${f.path}`, 'ok');
+  }
+
   function select(id) {
     selected = id === selected ? null : id;
     try { history.replaceState(null, '', selected ? '#' + selected : location.pathname); } catch (e) {}
@@ -430,6 +734,7 @@ if (typeof module !== 'undefined') module.exports = RL;
   const initial = decodeURIComponent(location.hash.slice(1));
   if (initial && loops.some(l => l.id === initial)) selected = initial;
   render();
+  cfgInit();
 })();
 </script>
 </body>

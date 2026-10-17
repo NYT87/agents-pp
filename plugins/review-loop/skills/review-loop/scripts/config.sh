@@ -9,7 +9,7 @@
 #   config.sh init      [scope] [--yes]           interactive wizard (Enter keeps a value, "-" clears
 #                                                 model / dashboard.out / dashboard.dirs)
 #   config.sh gitignore [--dry-run]               add the loop's paths to .gitignore
-#   config.sh keys                                list keys with types and descriptions
+#   config.sh keys [--json]                       list keys with types and descriptions
 #
 # Scope (which file, and where inside it):
 #   --project                ./.review-loop.json, shared by every provider      (default)
@@ -82,8 +82,12 @@ take_name() { # optional NAME after --provider / --provider-file
   # name never silently falls back to the running provider.
   [ $# -gt 1 ] || return 1
   local n
-  case "$2" in -*|*=*) return 1 ;; show|create|set|unset|init|gitignore|keys) return 1 ;; esac
-  key_type "$2" > /dev/null 2>&1 && return 1
+  case "$2" in -*|*=*) return 1 ;; esac
+  case "$2" in show|create|set|unset|init|gitignore|keys)
+    echo "note: '$1' took no provider name because '$2' is a command; use $1=$2 to name a provider so called" >&2; return 1 ;; esac
+  if key_type "$2" > /dev/null 2>&1; then
+    echo "note: '$1' took no provider name because '$2' is a config key; use $1=$2 to name a provider so called" >&2; return 1
+  fi
   n=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
   rl_valid_provider_name "$n" || rl_die "invalid provider name '$2' (letters, digits, '_' and '-', not starting with '-')"
   printf '%s' "$n"
@@ -93,9 +97,9 @@ while [ $# -gt 0 ]; do
     --user) SCOPE=user; EXPLICIT=1; shift ;;
     --project) SCOPE=project; EXPLICIT=1; shift ;;
     --provider=*) MODE=section; EXPLICIT=1; PNAME="${1#*=}"; shift ;;
-    --provider) MODE=section; EXPLICIT=1; if PNAME=$(take_name "$@"); then shift 2; else PNAME=""; shift; fi ;;
+    --provider) MODE=section; EXPLICIT=1; if PNAME=$(take_name "$1" "${2:-}"); then shift 2; else PNAME=""; shift; fi ;;
     --provider-file=*) MODE=file; EXPLICIT=1; PNAME="${1#*=}"; shift ;;
-    --provider-file) MODE=file; EXPLICIT=1; if PNAME=$(take_name "$@"); then shift 2; else PNAME=""; shift; fi ;;
+    --provider-file) MODE=file; EXPLICIT=1; if PNAME=$(take_name "$1" "${2:-}"); then shift 2; else PNAME=""; shift; fi ;;
     --json) JSON=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --dry-run) DRY=1; shift ;;
@@ -113,8 +117,13 @@ AUTO_NOTE=""
 # targets exactly what it names; masked writes are then reported by warn_masked.
 if [ "$EXPLICIT" = "0" ] && [ -n "$PROVIDER" ] \
    && [ ! -f "$ROOT/.$RL_CONFIG_NAME" ] && [ -f "$ROOT/.$PROVIDER/$RL_CONFIG_NAME" ]; then
-  MODE=file; PNAME="$PROVIDER"
-  AUTO_NOTE="using the existing $ROOT/.$PROVIDER/$RL_CONFIG_NAME (no shared $ROOT/.$RL_CONFIG_NAME yet; pass --project to create the shared file instead)"
+  if [ "$CMD" = "create" ]; then
+    # create means "make the shared file": do that, but say what outranks it.
+    AUTO_NOTE="$ROOT/.$PROVIDER/$RL_CONFIG_NAME exists and takes precedence over the shared file for provider $PROVIDER"
+  else
+    MODE=file; PNAME="$PROVIDER"
+    AUTO_NOTE="using the existing $ROOT/.$PROVIDER/$RL_CONFIG_NAME (no shared $ROOT/.$RL_CONFIG_NAME yet; pass --project to create the shared file instead)"
+  fi
 fi
 if [ "$MODE" != "shared" ]; then
   PNAME=$(printf '%s' "$PNAME" | tr '[:upper:]' '[:lower:]')
@@ -166,6 +175,11 @@ coerce() {
       jq -n --arg v "$raw" '$v' ;;
     integer)
       printf '%s' "$raw" | grep -qE '^[1-9][0-9]*$' || { echo "$key must be a positive integer (got '$raw')" >&2; return 1; }
+      # jq (and JSON consumers generally) store numbers as doubles: bound at 2^53 - 1
+      # so a value is never silently altered.
+      if [ "${#raw}" -gt 16 ] || { [ "${#raw}" -eq 16 ] && [ "$raw" \> "9007199254740991" ]; }; then
+        echo "$key is too large (max 9007199254740991, got '$raw')" >&2; return 1
+      fi
       echo "$raw" ;;
     boolean)
       case "$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')" in
@@ -199,6 +213,16 @@ warn_masked() {
 
 # ── Commands ─────────────────────────────────────────────────────────────────
 cmd_keys() {
+  local k
+  if [ "$JSON" = "1" ]; then
+    {
+      for k in $KEYS; do
+        jq -cn --arg k "$k" --arg t "$(key_type "$k")" --arg h "$(key_help "$k")" \
+          --argjson c "$(key_clearable "$k" && echo true || echo false)" '{key: $k, type: $t, help: $h, clearable: $c}'
+      done
+    } | jq -s --argjson b "$(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | jq -R . | jq -s .)" '{keys: ., backends: $b}'
+    return
+  fi
   for k in $KEYS; do printf '  %-16s %-9s %s\n' "$k" "$(key_type "$k")" "$(key_help "$k")"; done
 }
 
@@ -215,14 +239,16 @@ cmd_show() {
         --argjson e "$([ -f "$path" ] && echo true || echo false)" --argjson v "$(read_file "$path")" -n \
         '$a + [{label: $l, path: $p, kind: $k, exists: $e, values: $v}]')
     done < <(rl_config_files)
-    jq -n --argjson e "$eff" --argjson d "$def" --argjson f "$files" --arg prov "$PROVIDER" \
+    local sources='{}'
+    for k in $KEYS; do sources=$(jq -c --arg k "$k" --arg v "$(rl_config_source "$k")" '. + {($k): $v}' <<< "$sources"); done
+    jq -n --argjson e "$eff" --argjson d "$def" --argjson f "$files" --arg prov "$PROVIDER" --argjson src "$sources" \
       --arg scope "$SCOPE" --arg mode "$MODE" --arg target "$TARGET" --argjson section "$SECTION" \
       --argjson te "$([ -f "$TARGET" ] && echo true || echo false)" \
       --argjson se "$(NEW=$(read_file "$TARGET"); if [ "$SECTION" = "[]" ]; then [ -f "$TARGET" ] && echo true || echo false; else jq -c --argjson s "$SECTION" 'getpath($s) != null' <<< "$NEW"; fi)" \
       --arg note "$AUTO_NOTE" \
       '{provider: (if $prov == "" then null else $prov end), scope: $scope, mode: $mode, target: $target,
         section: $section, target_exists: $te, section_exists: $se, note: (if $note == "" then null else $note end),
-        effective: $e, defaults: $d, files: $f}'
+        effective: $e, defaults: $d, sources: $src, files: $f}'
     return
   fi
   echo "review-loop configuration"
@@ -256,6 +282,8 @@ cmd_create() {
   fi
   write_file "$TARGET" "$NEW"
   echo "Created $WHERE (empty: every value is inherited, see: config.sh show)"
+  [ -n "$AUTO_NOTE" ] && echo "note: $AUTO_NOTE"
+  return 0
 }
 
 cmd_set() {
@@ -281,11 +309,21 @@ cmd_unset() {
   for k in "${ARGS[@]}"; do
     key_type "$k" > /dev/null || rl_die "unknown key '$k'"
     NEW=$(jq -c --argjson p "$(tpath "$k")" --argjson s "$SECTION" \
-      'delpaths([$p]) | (if (getpath($s + ["dashboard"]) == {}) then delpaths([$s + ["dashboard"]]) else . end)' <<< "$NEW")
+      'delpaths([$p])
+       | (if (getpath($s + ["dashboard"]) == {}) then delpaths([$s + ["dashboard"]]) else . end)
+       | (if ($s | length) > 0 and getpath($s) == {} then delpaths([$s]) else . end)
+       | (if .providers == {} then del(.providers) else . end)' <<< "$NEW")
   done
   write_file "$TARGET" "$NEW"
   echo "Updated $WHERE"
   jq . "$TARGET" | sed 's/^/  /'
+  # Say what each key resolves to now, and from where, so a value that is still
+  # set by a higher-precedence source is not mistaken for "back to default".
+  local eff
+  eff=$(rl_resolve_config)
+  for k in "${ARGS[@]}"; do
+    echo "note: $k now resolves to $(display "$(get_in "$eff" "$k")") ($(rl_config_source "$k"))"
+  done
 }
 
 # A .gitignore pattern matching loop-id folder names (YYYYMMDD-HHMMSS-xxxxxx),

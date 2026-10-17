@@ -647,11 +647,15 @@ assert_eq "effective: user fills gaps" "reviews" "$(jq -r .effective.dir <<< "$J
 assert_contains "show names the source of each value" "max_rounds       3                      project shared" "$(cd "$R" && bash "$C" show)"
 assert_contains "show names the user source" "dir              reviews                user shared" "$(cd "$R" && bash "$C" show)"
 BEFORE=$(cat "$F")
-for bad in backend=nope max_rounds=0 max_rounds=x usage=maybe nokey=1 dir= ; do
+for bad in backend=nope max_rounds=0 max_rounds=x max_rounds=9007199254740992 max_rounds=10000000000000000 usage=maybe nokey=1 dir= ; do
   OUT=$(cd "$R" && bash "$C" set "$bad" 2>&1); RC=$?
   assert_eq "set rejects $bad" "1" "$RC"
 done
 assert_contains "backend error lists real backends only" "(available: claude codex)" "$(cd "$R" && bash "$C" set backend=nope 2>&1)"
+assert_contains "too-large integer explains the bound" "too large (max 9007199254740991" "$(cd "$R" && bash "$C" set max_rounds=9007199254740992 2>&1)"
+(cd "$R" && bash "$C" set max_rounds=9007199254740991 > /dev/null)
+assert_eq "2^53-1 stored exactly" "9007199254740991" "$(jq .max_rounds "$F")"
+(cd "$R" && bash "$C" set max_rounds=3 > /dev/null)
 assert_eq "invalid set leaves file untouched" "$BEFORE" "$(cat "$F")"
 assert_contains "set needs KEY=VALUE" "expected KEY=VALUE" "$(cd "$R" && bash "$C" set backend 2>&1)"
 (cd "$R" && bash "$C" unset model dashboard.auto dashboard.dirs > /dev/null)
@@ -845,9 +849,11 @@ assert_eq "set --user --provider-file writes ~/.codex" '2' "$(jq .max_rounds "$H
 assert_eq "set --user --provider writes the user shared section" 'true' "$(jq .providers.codex.usage "$HOME/.config/review-loop/config.json")"
 assert_eq "resolution under codex combines all of it (env backend, user section model, project section rounds, provider file dir)" '{"p":"codex","b":"fake","m":"o-reviewer","r":3,"d":"codex-loops"}' "$(cfg REVIEW_LOOP_PROVIDER=codex)"
 assert_eq "project section backend shows without the env override" '"claude"' "$(cd "$R" && env -u REVIEW_LOOP_BACKEND REVIEW_LOOP_PROVIDER=codex bash "$S/config.sh" show --json | jq .effective.backend)"
-(cd "$R" && bash "$C" unset --provider codex backend max_rounds > /dev/null)
-assert_eq "unset --provider empties the section" '{}' "$(jq -c .providers.codex "$R/.review-loop.json")"
+OUT=$(cd "$R" && bash "$C" unset --provider codex backend max_rounds)
+assert_eq "unset --provider prunes the emptied section" 'null' "$(jq -c .providers.codex "$R/.review-loop.json")"
 assert_eq "unset --provider leaves other sections" '"opus"' "$(jq .providers.claude.model "$R/.review-loop.json")"
+assert_contains "unset reports what each key resolves to now" "note: max_rounds now resolves to" "$OUT"
+(cd "$R" && bash "$C" create --provider codex > /dev/null)
 assert_contains "create --provider on an existing section" "already exists" "$(cd "$R" && bash "$C" create --provider codex)"
 OUT=$(cd "$R" && bash "$C" create --provider opencode)
 assert_contains "create --provider adds a new section" "Created $R/.review-loop.json (providers.opencode)" "$OUT"
@@ -1180,6 +1186,215 @@ if command -v node > /dev/null 2>&1; then
 else
   echo "  skip node not installed"
 fi
+
+section "dashboard configuration panel"
+R=$(new_repo r36); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
+assert_eq "keys --json lists every key" "9" "$(bash "$C" keys --json | jq '.keys | length')"
+assert_eq "keys --json excludes the fake backend" '["claude","codex"]' "$(bash "$C" keys --json | jq -c .backends)"
+assert_eq "keys --json marks clearable keys" "3" "$(bash "$C" keys --json | jq '[.keys[] | select(.clearable)] | length')"
+(cd "$R" && bash "$C" set max_rounds=3 > /dev/null)
+J=$(cd "$R" && bash "$C" show --json)
+assert_eq "show --json carries sources" '"project shared"' "$(jq .sources.max_rounds <<< "$J")"
+assert_eq "show --json source for env" '"env REVIEW_LOOP_BACKEND"' "$(jq .sources.backend <<< "$J")"
+assert_eq "show --json source default" '"default"' "$(jq .sources.model <<< "$J")"
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "dashboard embeds the config keys" "9" "$(jq '.config.keys | length' <<< "$D")"
+assert_eq "dashboard embeds effective values" "3" "$(jq .config.show.effective.max_rounds <<< "$D")"
+assert_eq "dashboard embeds sources" '"project shared"' "$(jq .config.show.sources.max_rounds <<< "$D")"
+CABS="$(cd "$(dirname "$C")" && pwd)/config.sh"
+assert_eq "dashboard embeds the config.sh path" "$CABS" "$(jq -r .config.script <<< "$D")"
+assert_eq "static page has no serve token" "null" "$(jq .serve <<< "$D")"
+mkdir -p "$R/.codex" "$HOME/.opencode"; echo '{"max_rounds": 2, "model": "o"}' > "$R/.codex/review-loop.json"; echo '{"dir": "oc"}' > "$HOME/.opencode/review-loop.json"
+mkdir -p "$R/.not a provider"; echo '{}' > "$R/.not a provider/review-loop.json"
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "dashboard embeds other providers' project files with contents" '{"max_rounds":2,"model":"o"}' "$(jq -c '[.config.provider_files[] | select(.provider == "codex" and .scope == "project")][0].values' <<< "$D")"
+assert_eq "dashboard embeds other providers' user files" '"oc"' "$(jq '[.config.provider_files[] | select(.provider == "opencode" and .scope == "user")][0].values.dir' <<< "$D")"
+assert_eq "invalid provider dir names are skipped" "0" "$(jq '[.config.provider_files[] | select(.provider | test(" "))] | length' <<< "$D")"
+assert_eq "dashboard embeds the user shared path" "$HOME/.config/review-loop/config.json" "$(jq -r .config.user_shared <<< "$D")"
+rm -rf "$R/.codex" "$HOME/.opencode" "$R/.not a provider"
+if command -v node > /dev/null 2>&1; then
+  DERIVE="$TMP/derive2.js"
+  sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
+  OUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const keys = [{key:"backend",type:"string"},{key:"max_rounds",type:"integer"},{key:"usage",type:"boolean"},{key:"dashboard.dirs",type:"list"},{key:"model",type:"string"}];
+    const eff = {backend:"codex", max_rounds:5, usage:false, model:"", dashboard:{dirs:["a","b"]}};
+    const form = {backend:"codex", max_rounds:"3", usage:"true", "dashboard.dirs":"a,b", model:"o p"};
+    const ch = RL.diffConfig(keys, eff, form);
+    console.log(JSON.stringify(ch.set));
+    console.log(RL.buildCommand("/x/config.sh", {scope:"project", mode:"shared"}, ch));
+    console.log(RL.buildCommand("/x/config.sh", {scope:"user", mode:"section", provider:"codex"}, {set:{max_rounds:"2"}, unset:["model"]}));
+    console.log(RL.buildCommand("/x/config.sh", {scope:"project", mode:"file", provider:"claude"}, {set:{}, unset:[]}) === "" ? "empty" : "nonempty");
+    const doc = RL.applyToFile({max_rounds: 1, providers:{codex:{backend:"claude"}}}, ["providers","codex"], {set:{max_rounds:"4", usage:"yes", "dashboard.dirs":"x, y"}}, keys);
+    console.log(JSON.stringify(doc));
+    console.log(JSON.stringify(RL.applyToFile(null, [], {set:{model:"opus"}}, keys)));
+  ' "$DERIVE")
+  assert_contains "diffConfig: only changed keys, raw strings" '{"max_rounds":"3","usage":"true","model":"o p"}' "$OUT"
+  assert_contains "buildCommand: set with quoting" "bash /x/config.sh set --project max_rounds=3 usage=true 'model=o p'" "$OUT"
+  assert_contains "buildCommand: section scope and unset line" "bash /x/config.sh set --user --provider=codex max_rounds=2
+bash /x/config.sh unset --user --provider=codex model" "$OUT"
+  assert_contains "buildCommand: empty change set" "empty" "$OUT"
+  assert_contains "applyToFile: typed values into the section" '{"max_rounds":1,"providers":{"codex":{"backend":"claude","max_rounds":4,"usage":true,"dashboard":{"dirs":["x","y"]}}}}' "$OUT"
+  assert_contains "applyToFile: new file" '{"model":"opus"}' "$OUT"
+  OUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const keys = [{key:"backend",type:"string"},{key:"max_rounds",type:"integer"},{key:"usage",type:"boolean"},{key:"dashboard.dirs",type:"list"},{key:"model",type:"string"},{key:"dir",type:"string"}];
+    const v = (k, raw) => RL.validateValue(keys.find(x => x.key === k), raw, ["claude","codex"]);
+    console.log(["max_rounds:", v("max_rounds",""), "|", v("max_rounds","1.5"), "|", v("max_rounds","0"), "|", v("max_rounds","3"),
+      "dir:", v("dir",""), "|", v("dir","x"), "backend:", v("backend","nope"), "|", v("backend","claude"),
+      "usage:", v("usage","maybe"), "|", v("usage","yes"), "model:", v("model","")].join(""));
+    // force: write the effective value to another file; remove: unset
+    const eff = {backend:"codex", max_rounds:3, usage:false, model:"", dir:".review-loop", dashboard:{dirs:[]}};
+    const form = {backend:"codex", max_rounds:"3", usage:"false", model:"", dir:".review-loop", "dashboard.dirs":""};
+    const ch = RL.diffConfig(keys, eff, form, {force:["max_rounds"], remove:["model","dashboard.dirs"]});
+    console.log(JSON.stringify(ch));
+    console.log(RL.buildCommand("/x/config.sh", {scope:"user", mode:"shared"}, ch));
+    const doc = RL.applyToFile({max_rounds:2, model:"old", dashboard:{dirs:["a"], auto:true}, providers:{codex:{backend:"claude"}}}, [], ch, keys);
+    console.log(JSON.stringify(doc));
+    const doc2 = RL.applyToFile({providers:{claude:{model:"m"}}}, ["providers","claude"], {set:{}, unset:["model"]}, keys);
+    console.log(JSON.stringify(doc2));
+    console.log(JSON.stringify(RL.applyToFile({max_rounds:1}, [], {set:{}, unset:["dashboard.dirs"]}, keys)));
+  ' "$DERIVE")
+  assert_contains "validateValue mirrors config.sh" "max_rounds:max_rounds must be a positive integer|max_rounds must be a positive integer|max_rounds must be a positive integer|dir:dir cannot be empty|backend:unknown backend 'nope'|usage:usage must be true or false|model:" "$OUT"
+  assert_contains "diffConfig: forced key written although equal, removals become unsets" '{"set":{"max_rounds":"3"},"unset":["dashboard.dirs","model"]}' "$OUT"
+  assert_contains "buildCommand: set and unset lines for the user file" "bash /x/config.sh set --user max_rounds=3
+bash /x/config.sh unset --user dashboard.dirs model" "$OUT"
+  assert_contains "applyToFile: unset removes keys and keeps the rest" '{"max_rounds":3,"dashboard":{"auto":true},"providers":{"codex":{"backend":"claude"}}}' "$OUT"
+  assert_contains "applyToFile: unset in a section prunes the empty section" '{}' "$OUT"
+  assert_contains "applyToFile: unset of a missing nested key is harmless" '{"max_rounds":1}' "$OUT"
+  OUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const keys = [{key:"max_rounds",type:"integer"},{key:"dashboard.dirs",type:"list"},{key:"model",type:"string"}];
+    console.log(JSON.stringify(RL.applyToFile({custom:{}, providers:{other:{}}, dashboard:{dirs:[]}}, [], {set:{max_rounds:"3"}, unset:[]}, keys)));
+    console.log(JSON.stringify(RL.applyToFile({custom:{}, providers:{other:{}, claude:{model:"m"}}, dashboard:{dirs:[], out:""}}, ["providers","claude"], {set:{}, unset:["model"]}, keys)));
+    console.log(JSON.stringify(RL.applyToFile({custom:{}, dashboard:{dirs:["a"]}, providers:{x:{}}}, [], {set:{}, unset:["dashboard.dirs"]}, keys)));
+    const v = raw => RL.validateValue(keys[0], raw, []);
+    console.log([v("9007199254740991"), "|", v("9007199254740992"), "|", v("99999999999999999"), "|", v("10000000000000000")].join(""));
+  ' "$DERIVE")
+  assert_contains "applyToFile: set leaves unrelated empty objects alone" '{"custom":{},"providers":{"other":{}},"dashboard":{"dirs":[]},"max_rounds":3}' "$OUT"
+  assert_contains "applyToFile: unset prunes only the emptied section" '{"custom":{},"providers":{"other":{}},"dashboard":{"dirs":[],"out":""}}' "$OUT"
+  assert_contains "applyToFile: unset prunes only its own emptied container" '{"custom":{},"providers":{"x":{}}}' "$OUT"
+  assert_contains "validateValue: safe-integer bound" "|max_rounds is too large (max 9007199254740991)|max_rounds is too large (max 9007199254740991)|max_rounds is too large (max 9007199254740991)" "$OUT"
+  assert_eq "validateValue: 2^53-1 accepted" "" "$(printf '%s\n' "$OUT" | tail -1 | cut -d'|' -f1)"
+  OUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const keys = [{key:"max_rounds",type:"integer"},{key:"model",type:"string"},{key:"dashboard.dirs",type:"list"}];
+    const text = `{"custom": {"id": 9007199254740993, "f": 1.50, "e": 1e5, "neg": -0, "arr": [10, 2.0]}, "s": "12 \\"x\\" 34 -5", "t": "\\u0001n:123", "u": "n:123", "max_rounds": 2, "providers": {"claude": {"model": "m"}}}`;
+    const lj = RL.losslessJSON(text);
+    const doc = RL.applyToFile(lj.doc, [], {set:{max_rounds:"3"}, unset:[]}, keys);
+    console.log(lj.stringify(doc).replace(/\s+/g, ""));
+    const lj2 = RL.losslessJSON(text);
+    console.log(lj2.stringify(RL.applyToFile(lj2.doc, ["providers","claude"], {set:{}, unset:["model"]}, keys)).replace(/\s+/g, ""));
+    const lj3 = RL.losslessJSON("{}"); console.log(lj3.stringify(lj3.doc) === "{}" ? "empty-ok" : "empty-bad");
+    try { RL.losslessJSON("{bad"); console.log("no-throw"); } catch (e) { console.log("throws"); }
+    // a string that happens to look like a marker with the nonce of a previous call must survive another call
+    const fake = `{"v": "n${lj.nonce}:123", "n": 7}`;
+    const lj4 = RL.losslessJSON(fake); console.log(lj4.stringify(lj4.doc).replace(/\s+/g, ""));
+    console.log(lj.nonce !== lj2.nonce ? "nonce-varies" : "nonce-fixed");
+    // R5-C1: a string (or key) that spells the nonce through JSON escapes must reject that nonce
+    const esc = `{"v": "n\\u0061bc123:5", "n\\u0061bc123:7": "k", "x": 1}`;
+    const lj5 = RL.losslessJSON(esc, ["abc123", "zzz999"]);
+    console.log(lj5.nonce === "zzz999" ? "escaped-nonce-rejected" : "escaped-nonce-" + lj5.nonce);
+    console.log(lj5.stringify(RL.applyToFile(lj5.doc, [], {set:{}, unset:[]}, keys)).replace(/\s+/g, ""));
+    const lj6 = RL.losslessJSON(`{"plain": "nabc123:9", "y": 2}`, ["abc123", "qqq111"]);
+    console.log(lj6.nonce === "qqq111" ? "plain-nonce-rejected" : "plain-nonce-" + lj6.nonce);
+  ' "$DERIVE")
+  assert_contains "lossless save: unrelated numbers byte-identical, edited key updated" '{"custom":{"id":9007199254740993,"f":1.50,"e":1e5,"neg":-0,"arr":[10,2.0]},"s":"12\"x\"34-5","t":"\u0001n:123","u":"n:123","max_rounds":3,"providers":{"claude":{"model":"m"}}}' "$OUT"
+  assert_contains "lossless save: unset in a section keeps the rest exact" '{"custom":{"id":9007199254740993,"f":1.50,"e":1e5,"neg":-0,"arr":[10,2.0]},"s":"12\"x\"34-5","t":"\u0001n:123","u":"n:123","max_rounds":2}' "$OUT"
+  assert_contains "lossless save: empty object" "empty-ok" "$OUT"
+  assert_eq "lossless save: marker-shaped string is still a string" "1" "$(printf '%s\n' "$OUT" | grep -c '^{"v":"n[0-9a-f]*:123","n":7}$')"
+  assert_contains "lossless save: nonce differs per call" "nonce-varies" "$OUT"
+  assert_contains "lossless save: nonce spelled through escapes is rejected" "escaped-nonce-rejected" "$OUT"
+  assert_contains "lossless save: escaped string and key survive unchanged" '{"v":"nabc123:5","nabc123:7":"k","x":1}' "$OUT"
+  assert_contains "lossless save: nonce present in a plain string is rejected" "plain-nonce-rejected" "$OUT"
+  assert_contains "lossless save: invalid JSON throws" "throws" "$OUT"
+else
+  echo "  skip node not installed"
+fi
+if command -v python3 > /dev/null 2>&1 && command -v curl > /dev/null 2>&1; then
+  PORT=$(( 20000 + RANDOM % 20000 ))
+  (cd "$R" && bash "$S/dashboard.sh" --serve --port "$PORT" > "$TMP/serve.log" 2>&1) &
+  SPID=$!
+  for i in $(seq 1 30); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; python3 -c 'import time; time.sleep(0.2)'; done
+  PAGE=$(curl -s "http://127.0.0.1:$PORT/")
+  TOKEN=$(printf '%s' "$PAGE" | grep -o '"serve":{"token":"[0-9a-f]*"}' | grep -o '[0-9a-f]\{32\}')
+  assert_eq "serve: page carries a 32-hex token" "32" "$(printf '%s' "$TOKEN" | wc -c | tr -d ' ')"
+  post() { curl -s -w '\n%{http_code}' -X POST "http://127.0.0.1:$PORT/api/config" -H "X-RL-Token: ${2:-$TOKEN}" -H 'Content-Type: application/json' -d "$1"; }
+  assert_contains "serve: bad token rejected" "403" "$(post '{"set":{"max_rounds":"4"}}' nope)"
+  assert_eq "serve: bad token writes nothing" "3" "$(jq .max_rounds "$R/.review-loop.json")"
+  OUT=$(post '{"scope":"project","mode":"shared","set":{"max_rounds":"4","usage":"true"}}')
+  assert_contains "serve: set applied through config.sh" "Updated $R/.review-loop.json" "$OUT"
+  assert_eq "serve: file updated" "4" "$(jq .max_rounds "$R/.review-loop.json")"
+  assert_eq "serve: boolean coerced" "true" "$(jq .usage "$R/.review-loop.json")"
+  OUT=$(post '{"scope":"project","mode":"section","provider":"codex","set":{"backend":"claude"}}')
+  assert_contains "serve: section write" "(providers.codex)" "$OUT"
+  assert_eq "serve: section stored" '"claude"' "$(jq .providers.codex.backend "$R/.review-loop.json")"
+  OUT=$(post '{"scope":"project","mode":"shared","unset":["usage"]}')
+  assert_eq "serve: unset applied" "null" "$(jq .usage "$R/.review-loop.json")"
+  assert_contains "serve: validation error surfaces with 422" "positive integer (got '0')" "$(post '{"set":{"max_rounds":"0"}}')"
+  assert_contains "serve: validation error status" "422" "$(post '{"set":{"max_rounds":"0"}}')"
+  assert_contains "serve: unknown key rejected" "400" "$(post '{"set":{"x; rm -rf /":"1"}}')"
+  assert_contains "serve: bad provider rejected" "400" "$(post '{"mode":"file","provider":"--user","set":{"max_rounds":"2"}}')"
+  assert_contains "serve: provider none rejected" "400" "$(post '{"mode":"section","provider":"none","set":{"max_rounds":"2"}}')"
+  assert_contains "serve: bad scope rejected" "400" "$(post '{"scope":"../x","set":{"max_rounds":"2"}}')"
+  assert_contains "serve: invalid JSON rejected" "400" "$(post 'not json')"
+  assert_contains "serve: unknown path is 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/etc/passwd")"
+  assert_contains "serve: reload shows the new value" '"max_rounds":4' "$(curl -s "http://127.0.0.1:$PORT/" | grep -o '"effective":{[^}]*}' | head -1)"
+  assert_contains "serve: page says where changes go" "applied with: bash $CABS" "$(cat "$TMP/serve.log")"
+  kill "$SPID" 2>/dev/null; wait "$SPID" 2>/dev/null
+  assert_contains "serve: refuses a bad port" "invalid port" "$(cd "$R" && bash "$S/dashboard.sh" --serve --port abc 2>&1 || true)"
+else
+  echo "  skip python3 or curl not installed"
+fi
+rm -f "$R/.review-loop.json"
+
+section "config robustness"
+R=$(new_repo r37); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
+cfgj() { (cd "$R" && bash "$S/config.sh" show --json | jq -c '{r: .effective.max_rounds, m: .effective.model, d: .effective.dir}'); }
+echo '{"providers": "oops", "max_rounds": 4}' > "$R/.review-loop.json"
+assert_eq "providers that is not an object is ignored, the rest applies" '{"r":4,"m":"","d":".review-loop"}' "$(cfgj)"
+echo '{"providers": {"claude": "x"}, "max_rounds": 4}' > "$R/.review-loop.json"
+assert_eq "a provider section that is not an object is ignored" '{"r":4,"m":"","d":".review-loop"}' "$(cfgj)"
+echo '[1, 2]' > "$R/.review-loop.json"
+assert_eq "a top-level array is ignored like invalid JSON" '{"r":5,"m":"","d":".review-loop"}' "$(cfgj)"
+echo '"just a string"' > "$R/.review-loop.json"
+assert_eq "a top-level string is ignored" '{"r":5,"m":"","d":".review-loop"}' "$(cfgj)"
+mkdir -p "$HOME/.config/review-loop"; echo '{"model": "opus", "max_rounds": 7}' > "$HOME/.config/review-loop/config.json"
+echo '{"model": null, "max_rounds": null, "dir": "d"}' > "$R/.review-loop.json"
+assert_eq "null values never wipe lower-precedence values" '{"r":7,"m":"opus","d":"d"}' "$(cfgj)"
+echo '{"providers": {"claude": {"model": null}}, "model": "shared"}' > "$R/.review-loop.json"
+assert_eq "null in a provider section is dropped too" '"shared"' "$(cd "$R" && bash "$S/config.sh" show --json | jq .effective.model)"
+echo '{"providers": "oops"}' > "$R/.review-loop.json"
+assert_eq "config source survives malformed providers" '"user shared"' "$(cd "$R" && bash "$S/config.sh" show --json | jq .sources.model)"
+start "$R" "t" > /dev/null; L=$(pointer "$R"); echo x > "$R/f"
+H=$(hook "$R" s1)
+assert_eq "stop hook still blocks with a malformed config" "block" "$(decision "$H")"
+assert_eq "start.sh resolves through a malformed providers value" "7" "$(st "$L" max_rounds)"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+OUT=$(cd "$R" && bash "$S/dashboard.sh" 2>&1)
+assert_contains "dashboard generates with a malformed config" "1 loop(s)" "$OUT"
+rm -f "$R/.review-loop.json" "$HOME/.config/review-loop/config.json"
+# create with only a legacy provider file makes the shared file and says what outranks it
+mkdir -p "$R/.claude"; echo '{"max_rounds": 2}' > "$R/.claude/review-loop.json"
+OUT=$(cd "$R" && bash "$C" create)
+assert_contains "create makes the shared file despite a legacy file" "Created $R/.review-loop.json" "$OUT"
+assert_contains "create notes the file that takes precedence" "note: $R/.claude/review-loop.json exists and takes precedence" "$OUT"
+assert_file "shared file created" "$R/.review-loop.json"
+# unset: pruning and masking note
+(cd "$R" && bash "$C" set --provider codex dashboard.auto=true > /dev/null)
+(cd "$R" && bash "$C" unset --provider codex dashboard.auto > /dev/null)
+assert_eq "unset prunes empty dashboard, section and providers" '{}' "$(jq -c . "$R/.review-loop.json")"
+(cd "$R" && bash "$C" set --project max_rounds=9 > /dev/null)
+OUT=$(cd "$R" && bash "$C" unset --project max_rounds)
+assert_contains "unset note names the masking source" "max_rounds now resolves to 2 (project claude)" "$OUT"
+# take_name explains why a key or command word was not taken as a name
+OUT=$(cd "$R" && bash "$C" show --provider backend 2>&1 || true)
+assert_contains "key-shaped word after --provider is explained" "note: '--provider' took no provider name because 'backend' is a config key" "$OUT"
+OUT=$(cd "$R" && bash "$C" show --provider-file keys 2>&1 || true)
+assert_contains "command-shaped word after --provider-file is explained" "'keys' is a command" "$OUT"
+rm -f "$R/.review-loop.json" "$R/.claude/review-loop.json"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # review-loop — generate a self-contained HTML dashboard of all review loops.
 #
-# Usage: dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open]
+# Usage: dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open] [--serve [--port N]]
 #   --dir DIR   storage dir to scan (repeatable; default: config dashboard.dirs,
 #               or the configured loop dir)
 #   --out FILE  where to write the page (default: config dashboard.out, or
@@ -14,6 +14,13 @@
 #   "auto": true regenerates the page every time a loop ends.
 # Env: REVIEW_LOOP_DASHBOARD_OPEN=0|1, REVIEW_LOOP_DASHBOARD_OUT=FILE
 #
+# The page embeds the current configuration (config.sh show --json) and lets
+# you edit it. Without --serve it is a static file: the page shows the
+# config.sh command for your changes and can save the file through the
+# browser. With --serve (needs python3) a loopback-only server applies changes
+# through config.sh directly; it runs until Ctrl-C and regenerates the page on
+# every load.
+#
 # The page embeds every loop's state, task, coder summaries, reviews and
 # summary as JSON and renders them with no network access needed.
 set -euo pipefail
@@ -22,7 +29,7 @@ set -euo pipefail
 
 command -v jq > /dev/null 2>&1 || rl_die "'jq' is required"
 
-DIRS=() OUT="" OPEN=""
+DIRS=() OUT="" OPEN="" SERVE=0 PORT=8765 SERVE_TOKEN=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIRS+=("${2:-}"); shift 2 ;;
@@ -31,10 +38,15 @@ while [ $# -gt 0 ]; do
     --out=*) OUT="${1#*=}"; shift ;;
     --open) OPEN=1; shift ;;
     --no-open) OPEN=0; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --serve) SERVE=1; shift ;;
+    --port) PORT="${2:-}"; shift 2 ;;
+    --port=*) PORT="${1#*=}"; shift ;;
+    --serve-token) SERVE_TOKEN="${2:-}"; shift 2 ;;   # internal: regeneration by the server
+    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) rl_die "unknown argument '$1'" ;;
   esac
 done
+printf '%s' "$PORT" | grep -qE '^[0-9]{2,5}$' || rl_die "invalid port '$PORT'"
 
 ROOT="$PWD"
 CFG=$(rl_resolve_config)
@@ -91,8 +103,30 @@ while IFS=$'\t' read -r phys d; do
   COUNT=$(( COUNT + 1 ))
 done < <(sort -t "$(printf '\t')" -k1,1 -u -s "$CANDIDATES")
 
-jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" \
-  '{generated_at: $t, root: $root, loops: (sort_by([.state.started_at, .state.loop_id]) | reverse)}' \
+# Configuration, as config.sh reports it, so the page can show and edit it.
+(cd "$ROOT" && bash "$RL_SCRIPTS_DIR/config.sh" show --json) > "$WORK/config-show.json" 2>/dev/null || echo 'null' > "$WORK/config-show.json"
+bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/null || echo '{"keys":[],"backends":[]}' > "$WORK/config-keys.json"
+# Every existing per-provider file (any provider), so the page can merge edits
+# into a file other than the running provider's instead of overwriting it.
+: > "$WORK/provider-files.jsonl"
+for base in "$ROOT" "$HOME"; do
+  for f in "$base"/.*/"$RL_CONFIG_NAME"; do
+    [ -f "$f" ] || continue
+    pname=$(basename "$(dirname "$f")"); pname="${pname#.}"
+    rl_valid_provider_name "$pname" || continue
+    jq -c --arg l "$([ "$base" = "$ROOT" ] && echo project || echo user) $pname" --arg p "$f" --arg prov "$pname" \
+      --arg scope "$([ "$base" = "$ROOT" ] && echo project || echo user)" \
+      '{label: $l, path: $p, kind: "provider", provider: $prov, scope: $scope, exists: true, values: .}' "$f" >> "$WORK/provider-files.jsonl" 2>/dev/null || true
+  done
+done
+jq -s . "$WORK/provider-files.jsonl" > "$WORK/provider-files.json"
+jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" --arg script "$RL_SCRIPTS_DIR/config.sh" --arg token "$SERVE_TOKEN" \
+  --slurpfile show "$WORK/config-show.json" --slurpfile keys "$WORK/config-keys.json" --slurpfile pf "$WORK/provider-files.json" \
+  --arg home "$HOME" --arg ucfg "$(rl_user_config_dir)/config.json" \
+  '{generated_at: $t, root: $root, loops: (sort_by([.state.started_at, .state.loop_id]) | reverse),
+    config: {show: $show[0], keys: $keys[0].keys, backends: $keys[0].backends, script: $script,
+             provider_files: $pf[0], home: $home, user_shared: $ucfg},
+    serve: (if $token == "" then null else {token: $token} end)}' \
   "$LOOPS_FILE" | sed 's|</|<\\/|g' > "$WORK/data.json"
 
 # ── Render ───────────────────────────────────────────────────────────────────
@@ -110,6 +144,118 @@ awk -v datafile="$WORK/data.json" '
     print post; next
   }
   { print }' "$TEMPLATE" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+
+if [ "$SERVE" = "1" ] && [ -z "$SERVE_TOKEN" ]; then
+  command -v python3 > /dev/null 2>&1 || rl_die "--serve needs python3"
+  TOKEN=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  # Regenerate once with the token embedded, then serve. The server re-runs this
+  # script (with --serve-token) on every page load so the data is always fresh.
+  DIR_ARGS=(); for d in "${DIRS[@]}"; do DIR_ARGS+=(--dir "$d"); done
+  bash "$0" --no-open --out "$OUT" "${DIR_ARGS[@]}" --serve-token "$TOKEN" > /dev/null
+  echo "review-loop dashboard: serving $OUT on http://127.0.0.1:$PORT/ (Ctrl-C to stop)"
+  echo "  changes made in the page are applied with: bash $RL_SCRIPTS_DIR/config.sh"
+  if [ "$OPEN" = "1" ]; then
+    if command -v open > /dev/null 2>&1; then open "http://127.0.0.1:$PORT/"
+    elif command -v xdg-open > /dev/null 2>&1; then xdg-open "http://127.0.0.1:$PORT/"; fi
+  fi
+  REVIEW_LOOP_SERVE_TOKEN="$TOKEN" REVIEW_LOOP_SERVE_PAGE="$OUT" REVIEW_LOOP_SERVE_ROOT="$ROOT" \
+  REVIEW_LOOP_SERVE_SCRIPTS="$RL_SCRIPTS_DIR" REVIEW_LOOP_SERVE_PORT="$PORT" REVIEW_LOOP_SERVE_DIRS="$(printf '%s\n' "${DIRS[@]}")" \
+  exec python3 - << 'PY_SERVER'
+import json, os, subprocess, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+TOKEN = os.environ["REVIEW_LOOP_SERVE_TOKEN"]
+PAGE = os.environ["REVIEW_LOOP_SERVE_PAGE"]
+ROOT = os.environ["REVIEW_LOOP_SERVE_ROOT"]
+SCRIPTS = os.environ["REVIEW_LOOP_SERVE_SCRIPTS"]
+PORT = int(os.environ["REVIEW_LOOP_SERVE_PORT"])
+DIRS = [d for d in os.environ.get("REVIEW_LOOP_SERVE_DIRS", "").split("\n") if d]
+KEY_RE = __import__("re").compile(r"^[a-z_]+(\.[a-z_]+)?$")
+NAME_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+def regenerate():
+    args = ["bash", os.path.join(SCRIPTS, "dashboard.sh"), "--no-open", "--out", PAGE, "--serve-token", TOKEN]
+    for d in DIRS:
+        args += ["--dir", d]
+    subprocess.run(args, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=dict(os.environ, REVIEW_LOOP_DASHBOARD_OPEN="0"))
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):  # quiet
+        pass
+
+    def _json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path.split("?")[0] not in ("/", "/index.html", "/dashboard.html"):
+            self._json(404, {"ok": False, "output": "not found"}); return
+        regenerate()
+        with open(PAGE, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path != "/api/config":
+            self._json(404, {"ok": False, "output": "not found"}); return
+        if self.headers.get("X-RL-Token") != TOKEN:
+            self._json(403, {"ok": False, "output": "bad token (reload the page)"}); return
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+            req = json.loads(self.rfile.read(n).decode() or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "output": "invalid JSON"}); return
+        # Build the config.sh argv strictly from validated fields (no shell).
+        flags = []
+        scope = req.get("scope", "project")
+        if scope not in ("project", "user"):
+            self._json(400, {"ok": False, "output": "bad scope"}); return
+        flags.append("--" + scope)
+        mode = req.get("mode", "shared")
+        if mode not in ("shared", "section", "file"):
+            self._json(400, {"ok": False, "output": "bad mode"}); return
+        if mode != "shared":
+            name = str(req.get("provider") or "")
+            if not NAME_RE.match(name) or name == "none":
+                self._json(400, {"ok": False, "output": "bad provider name"}); return
+            flags.append(("--provider=" if mode == "section" else "--provider-file=") + name)
+        sets = req.get("set") or {}
+        unsets = req.get("unset") or []
+        if not isinstance(sets, dict) or not isinstance(unsets, list):
+            self._json(400, {"ok": False, "output": "bad payload"}); return
+        for k in list(sets) + list(unsets):
+            if not isinstance(k, str) or not KEY_RE.match(k):
+                self._json(400, {"ok": False, "output": "bad key %r" % (k,)}); return
+        outputs, ok = [], True
+        cfg = os.path.join(SCRIPTS, "config.sh")
+        if sets:
+            r = subprocess.run(["bash", cfg, "set"] + flags + ["%s=%s" % (k, str(v)) for k, v in sets.items()],
+                               cwd=ROOT, capture_output=True, text=True)
+            outputs.append(r.stdout + r.stderr); ok = ok and r.returncode == 0
+        if unsets and ok:
+            r = subprocess.run(["bash", cfg, "unset"] + flags + [str(k) for k in unsets], cwd=ROOT, capture_output=True, text=True)
+            outputs.append(r.stdout + r.stderr); ok = ok and r.returncode == 0
+        if not sets and not unsets:
+            outputs.append("nothing to change")
+        self._json(200 if ok else 422, {"ok": ok, "output": "".join(outputs)})
+
+HTTPServer.allow_reuse_address = True
+srv = HTTPServer(("127.0.0.1", PORT), Handler)
+try:
+    srv.serve_forever()
+except KeyboardInterrupt:
+    pass
+PY_SERVER
+fi
 
 echo "review-loop dashboard: $COUNT loop(s) from ${DIRS[*]}"
 echo "  written to $OUT"
