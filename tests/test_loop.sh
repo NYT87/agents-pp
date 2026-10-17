@@ -1207,13 +1207,43 @@ assert_eq "dashboard embeds the config.sh path" "$CABS" "$(jq -r .config.script 
 assert_eq "static page has no serve token" "null" "$(jq .serve <<< "$D")"
 mkdir -p "$R/.codex" "$HOME/.opencode"; echo '{"max_rounds": 2, "model": "o"}' > "$R/.codex/review-loop.json"; echo '{"dir": "oc"}' > "$HOME/.opencode/review-loop.json"
 mkdir -p "$R/.not a provider"; echo '{}' > "$R/.not a provider/review-loop.json"
-(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+(cd "$R" && bash "$S/dashboard.sh" --with-user-config > /dev/null)
 D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
 assert_eq "dashboard embeds other providers' project files with contents" '{"max_rounds":2,"model":"o"}' "$(jq -c '[.config.provider_files[] | select(.provider == "codex" and .scope == "project")][0].values' <<< "$D")"
 assert_eq "dashboard embeds other providers' user files" '"oc"' "$(jq '[.config.provider_files[] | select(.provider == "opencode" and .scope == "user")][0].values.dir' <<< "$D")"
 assert_eq "invalid provider dir names are skipped" "0" "$(jq '[.config.provider_files[] | select(.provider | test(" "))] | length' <<< "$D")"
 assert_eq "dashboard embeds the user shared path" "$HOME/.config/review-loop/config.json" "$(jq -r .config.user_shared <<< "$D")"
 rm -rf "$R/.codex" "$HOME/.opencode" "$R/.not a provider"
+# static pages never carry user-level configuration
+mkdir -p "$HOME/.config/review-loop" "$HOME/.claude" "$HOME/.opencode"
+echo '{"model": "USER-SECRET-MODEL", "providers": {"claude": {"max_rounds": 77}}}' > "$HOME/.config/review-loop/config.json"
+echo '{"usage": true, "model": "USER-CLAUDE-SECRET"}' > "$HOME/.claude/review-loop.json"
+echo '{"dir": "OPENCODE-SECRET"}' > "$HOME/.opencode/review-loop.json"
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+assert_eq "static page has no user secrets at all" "0" "$(grep -c 'SECRET' "$R/.review-loop/dashboard.html")"
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "static page flags redaction" "true" "$(jq .config.show.redacted_user_config <<< "$D")"
+assert_eq "user files still listed" "2" "$(jq '[.config.show.files[] | select(.label | startswith("user "))] | length' <<< "$D")"
+assert_eq "user file contents stripped" "true" "$(jq '[.config.show.files[] | select(.label | startswith("user "))] | all(.values == null and .redacted)' <<< "$D")"
+assert_eq "user-sourced effective values hidden" "null" "$(jq .config.show.effective.model <<< "$D")"
+assert_eq "sources still name the user file" '"user claude"' "$(jq .config.show.sources.model <<< "$D")"
+assert_eq "user provider-file values hidden too" "null" "$(jq .config.show.effective.usage <<< "$D")"
+assert_eq "project-sourced values still shown" "3" "$(jq .config.show.effective.max_rounds <<< "$D")"
+assert_eq "home provider files not embedded" "0" "$(jq '[.config.provider_files[] | select(.scope == "user")] | length' <<< "$D")"
+(cd "$R" && bash "$S/dashboard.sh" --with-user-config > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "--with-user-config embeds user values" '"USER-CLAUDE-SECRET"' "$(jq .config.show.effective.model <<< "$D")"
+assert_eq "--with-user-config embeds user file contents" '"USER-SECRET-MODEL"' "$(jq '[.config.show.files[] | select(.label == "user shared")][0].values.model' <<< "$D")"
+assert_eq "--with-user-config lists home provider files" "2" "$(jq '[.config.provider_files[] | select(.scope == "user")] | length' <<< "$D")"
+(cd "$R" && REVIEW_LOOP_MODEL=ENV-SECRET-MODEL bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "static page has no environment override value" "0" "$(grep -c 'ENV-SECRET-MODEL' "$R/.review-loop/dashboard.html")"
+assert_eq "environment-sourced effective value hidden" "null" "$(jq .config.show.effective.model <<< "$D")"
+assert_eq "source still names environment override" '"env REVIEW_LOOP_MODEL"' "$(jq .config.show.sources.model <<< "$D")"
+(cd "$R" && REVIEW_LOOP_MODEL=ENV-SECRET-MODEL bash "$S/dashboard.sh" --with-user-config > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "--with-user-config embeds environment override value" '"ENV-SECRET-MODEL"' "$(jq .config.show.effective.model <<< "$D")"
+rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json" "$HOME/.opencode"
 if command -v node > /dev/null 2>&1; then
   DERIVE="$TMP/derive2.js"
   sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
@@ -1314,8 +1344,9 @@ else
   echo "  skip node not installed"
 fi
 if command -v python3 > /dev/null 2>&1 && command -v curl > /dev/null 2>&1; then
+  mkdir -p "$TMP/servetmp0"
   PORT=$(( 20000 + RANDOM % 20000 ))
-  (cd "$R" && bash "$S/dashboard.sh" --serve --port "$PORT" > "$TMP/serve.log" 2>&1) &
+  (cd "$R" && TMPDIR="$TMP/servetmp0" exec bash "$S/dashboard.sh" --serve --port "$PORT" > "$TMP/serve.log" 2>&1) &
   SPID=$!
   for i in $(seq 1 30); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; python3 -c 'import time; time.sleep(0.2)'; done
   PAGE=$(curl -s "http://127.0.0.1:$PORT/")
@@ -1342,9 +1373,58 @@ if command -v python3 > /dev/null 2>&1 && command -v curl > /dev/null 2>&1; then
   assert_contains "serve: invalid JSON rejected" "400" "$(post 'not json')"
   assert_contains "serve: unknown path is 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/etc/passwd")"
   assert_contains "serve: reload shows the new value" '"max_rounds":4' "$(curl -s "http://127.0.0.1:$PORT/" | grep -o '"effective":{[^}]*}' | head -1)"
+  mkdir -p "$HOME/.config/review-loop"; echo '{"model": "SERVED-USER-VALUE"}' > "$HOME/.config/review-loop/config.json"
+  assert_contains "serve: served page includes user config" "SERVED-USER-VALUE" "$(curl -s "http://127.0.0.1:$PORT/")"
+  rm -rf "$HOME/.config/review-loop"
+  BEFORE=$(cat "$R/.review-loop.json")
+  OUT=$(post '{"scope":"project","mode":"shared","set":{"max_rounds":"6"},"unset":["nokey"]}')
+  assert_contains "serve: unknown unset key rejected before any write" "400" "$OUT"
+  assert_contains "serve: names the unknown key" "unknown key 'nokey'" "$OUT"
+  assert_eq "serve: the set in that request was not applied" "$BEFORE" "$(cat "$R/.review-loop.json")"
+  assert_contains "serve: set and unset of the same key rejected" "400" "$(post '{"set":{"max_rounds":"6"},"unset":["max_rounds"]}')"
+  assert_contains "serve: non-scalar value rejected" "400" "$(post '{"set":{"max_rounds":{"a":1}}}')"
   assert_contains "serve: page says where changes go" "applied with: bash $CABS" "$(cat "$TMP/serve.log")"
   kill "$SPID" 2>/dev/null; wait "$SPID" 2>/dev/null
   assert_contains "serve: refuses a bad port" "invalid port" "$(cd "$R" && bash "$S/dashboard.sh" --serve --port abc 2>&1 || true)"
+  # the configured output never carries the served page (token, user config).
+  # Served pages go to a TMPDIR owned by this test so other servers or leftovers
+  # elsewhere on the machine cannot affect the counts below.
+  STMP="$TMP/servetmp"; mkdir -p "$STMP"
+  privdirs() { ls -d "$STMP"/review-loop-serve.* 2>/dev/null | wc -l | tr -d ' '; }
+  mkdir -p "$HOME/.config/review-loop"; echo '{"model": "HOME-ONLY-VALUE"}' > "$HOME/.config/review-loop/config.json"
+  PORT=$(( 20000 + RANDOM % 20000 ))
+  (cd "$R" && TMPDIR="$STMP" exec bash "$S/dashboard.sh" --serve --port "$PORT" --out docs/loops.html > "$TMP/serve2.log" 2>&1) &
+  SPID=$!
+  for i in $(seq 1 30); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; python3 -c 'import time; time.sleep(0.2)'; done
+  PAGE=$(curl -s "http://127.0.0.1:$PORT/")
+  assert_contains "serve: served page has the user value" "HOME-ONLY-VALUE" "$PAGE"
+  assert_contains "serve: served page has a token" '"serve":{"token":"' "$PAGE"
+  assert_eq "serve: configured output exists" "1" "$([ -f "$R/docs/loops.html" ] && echo 1 || echo 0)"
+  assert_eq "serve: configured output has no user value" "0" "$(grep -c 'HOME-ONLY-VALUE' "$R/docs/loops.html")"
+  assert_eq "serve: configured output has no token" "0" "$(grep -c '"serve":{"token"' "$R/docs/loops.html")"
+  assert_contains "serve: configured output is the redacted page" '"redacted_user_config":true' "$(cat "$R/docs/loops.html")"
+  PRIV=$(ls -d "$STMP"/review-loop-serve.* 2>/dev/null | head -1)
+  assert_eq "serve: exactly one private dir in the test TMPDIR" "1" "$(privdirs)"
+  assert_eq "serve: private page exists while serving" "1" "$([ -n "$PRIV" ] && [ -f "$PRIV/dashboard.html" ] && echo 1 || echo 0)"
+  assert_eq "serve: private page is 0600" "600" "$(stat -f '%Lp' "$PRIV/dashboard.html" 2>/dev/null || stat -c '%a' "$PRIV/dashboard.html")"
+  kill "$SPID" 2>/dev/null; wait "$SPID" 2>/dev/null
+  assert_eq "serve: private page removed when the server stops" "0" "$([ -e "$PRIV" ] && echo 1 || echo 0)"
+  assert_eq "serve: test TMPDIR empty of private dirs" "0" "$(privdirs)"
+  assert_contains "serve: log names the shareable static page" "static page (shareable, user config hidden): $R/docs/loops.html" "$(cat "$TMP/serve2.log")"
+  # a failed start never leaves the private page behind
+  assert_contains "serve: out-of-range port rejected" "invalid port '99999'" "$(cd "$R" && TMPDIR="$STMP" bash "$S/dashboard.sh" --serve --port 99999 2>&1 || true)"
+  assert_eq "serve: out-of-range port leaves no private dir" "0" "$(privdirs)"
+  PORT=$(( 20000 + RANDOM % 20000 ))
+  (cd "$R" && TMPDIR="$STMP" exec bash "$S/dashboard.sh" --serve --port "$PORT" > "$TMP/serve3.log" 2>&1) &
+  SPID=$!
+  for i in $(seq 1 30); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; python3 -c 'import time; time.sleep(0.2)'; done
+  OUT=$(cd "$R" && TMPDIR="$STMP" bash "$S/dashboard.sh" --serve --port "$PORT" 2>&1); RC=$?
+  assert_eq "serve: port in use fails" "1" "$RC"
+  assert_contains "serve: port in use is reported" "cannot listen on 127.0.0.1:$PORT" "$OUT"
+  assert_eq "serve: port in use leaves only the running server's private dir" "1" "$(privdirs)"
+  kill "$SPID" 2>/dev/null; wait "$SPID" 2>/dev/null
+  assert_eq "serve: no private dirs after everything stopped" "0" "$(privdirs)"
+  rm -rf "$HOME/.config/review-loop"
 else
   echo "  skip python3 or curl not installed"
 fi

@@ -2,6 +2,7 @@
 # review-loop — generate a self-contained HTML dashboard of all review loops.
 #
 # Usage: dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open] [--serve [--port N]]
+#                     [--with-user-config]
 #   --dir DIR   storage dir to scan (repeatable; default: config dashboard.dirs,
 #               or the configured loop dir)
 #   --out FILE  where to write the page (default: config dashboard.out, or
@@ -15,7 +16,13 @@
 # Env: REVIEW_LOOP_DASHBOARD_OPEN=0|1, REVIEW_LOOP_DASHBOARD_OUT=FILE
 #
 # The page embeds the current configuration (config.sh show --json) and lets
-# you edit it. Without --serve it is a static file: the page shows the
+# you edit it. A static page may be committed or shared, so by default it
+# carries only project-level configuration: user files (~/.config/review-loop,
+# ~/.<provider>/review-loop.json) are listed without contents, and effective
+# values from those files or environment overrides are hidden.
+# --with-user-config embeds them anyway. A served
+# page always has them, but it is rendered into a private temp file that the
+# server deletes on exit; the configured output keeps the redacted page. Without --serve it is a static file: the page shows the
 # config.sh command for your changes and can save the file through the
 # browser. With --serve (needs python3) a loopback-only server applies changes
 # through config.sh directly; it runs until Ctrl-C and regenerates the page on
@@ -29,7 +36,7 @@ set -euo pipefail
 
 command -v jq > /dev/null 2>&1 || rl_die "'jq' is required"
 
-DIRS=() OUT="" OPEN="" SERVE=0 PORT=8765 SERVE_TOKEN=""
+DIRS=() OUT="" OPEN="" SERVE=0 PORT=8765 SERVE_TOKEN="" WITH_USER=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIRS+=("${2:-}"); shift 2 ;;
@@ -42,11 +49,12 @@ while [ $# -gt 0 ]; do
     --port) PORT="${2:-}"; shift 2 ;;
     --port=*) PORT="${1#*=}"; shift ;;
     --serve-token) SERVE_TOKEN="${2:-}"; shift 2 ;;   # internal: regeneration by the server
-    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --with-user-config) WITH_USER=1; shift ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) rl_die "unknown argument '$1'" ;;
   esac
 done
-printf '%s' "$PORT" | grep -qE '^[0-9]{2,5}$' || rl_die "invalid port '$PORT'"
+printf '%s' "$PORT" | grep -qE '^[0-9]{1,5}$' && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || rl_die "invalid port '$PORT' (1-65535)"
 
 ROOT="$PWD"
 CFG=$(rl_resolve_config)
@@ -120,6 +128,18 @@ for base in "$ROOT" "$HOME"; do
   done
 done
 jq -s . "$WORK/provider-files.jsonl" > "$WORK/provider-files.json"
+if [ "$WITH_USER" = "0" ] && [ -z "$SERVE_TOKEN" ]; then
+  # Static page: strip user-file contents and values sourced from user files
+  # or environment overrides. Files stay listed (path, existence) so the panel
+  # can explain where values come from.
+  jq -c 'if . == null then . else
+    .files |= map(if (.label | startswith("user ")) then .values = null | .redacted = true else . end)
+    | . as $show
+    | reduce ($show.sources | to_entries[] | select(.value | (startswith("user ") or startswith("env ")))) as $e
+        (.; .effective |= setpath(($e.key | split(".")); null))
+    | .redacted_user_config = true end' "$WORK/config-show.json" > "$WORK/config-show.tmp" && mv "$WORK/config-show.tmp" "$WORK/config-show.json"
+  jq -c 'map(select(.scope == "project"))' "$WORK/provider-files.json" > "$WORK/pf.tmp" && mv "$WORK/pf.tmp" "$WORK/provider-files.json"
+fi
 jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" --arg script "$RL_SCRIPTS_DIR/config.sh" --arg token "$SERVE_TOKEN" \
   --slurpfile show "$WORK/config-show.json" --slurpfile keys "$WORK/config-keys.json" --slurpfile pf "$WORK/provider-files.json" \
   --arg home "$HOME" --arg ucfg "$(rl_user_config_dir)/config.json" \
@@ -148,36 +168,56 @@ awk -v datafile="$WORK/data.json" '
 if [ "$SERVE" = "1" ] && [ -z "$SERVE_TOKEN" ]; then
   command -v python3 > /dev/null 2>&1 || rl_die "--serve needs python3"
   TOKEN=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
-  # Regenerate once with the token embedded, then serve. The server re-runs this
-  # script (with --serve-token) on every page load so the data is always fresh.
+  # The served page carries the token and the user's own configuration, so it
+  # is rendered into a private temp file (0600) that the server deletes on
+  # exit. The configured output ($OUT, written above) stays the redacted,
+  # shareable page. The server re-runs this script (with --serve-token) into
+  # the private file on every page load so the data is always fresh.
+  SERVE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/review-loop-serve.XXXXXX")
+  chmod 700 "$SERVE_DIR"
+  SERVE_PAGE="$SERVE_DIR/dashboard.html"
   DIR_ARGS=(); for d in "${DIRS[@]}"; do DIR_ARGS+=(--dir "$d"); done
-  bash "$0" --no-open --out "$OUT" "${DIR_ARGS[@]}" --serve-token "$TOKEN" > /dev/null
-  echo "review-loop dashboard: serving $OUT on http://127.0.0.1:$PORT/ (Ctrl-C to stop)"
+  bash "$0" --no-open --out "$SERVE_PAGE" "${DIR_ARGS[@]}" --serve-token "$TOKEN" --with-user-config > /dev/null
+  chmod 600 "$SERVE_PAGE"
+  echo "review-loop dashboard: serving on http://127.0.0.1:$PORT/ (Ctrl-C to stop)"
+  echo "  static page (shareable, user config hidden): $OUT"
   echo "  changes made in the page are applied with: bash $RL_SCRIPTS_DIR/config.sh"
   if [ "$OPEN" = "1" ]; then
     if command -v open > /dev/null 2>&1; then open "http://127.0.0.1:$PORT/"
     elif command -v xdg-open > /dev/null 2>&1; then xdg-open "http://127.0.0.1:$PORT/"; fi
   fi
-  REVIEW_LOOP_SERVE_TOKEN="$TOKEN" REVIEW_LOOP_SERVE_PAGE="$OUT" REVIEW_LOOP_SERVE_ROOT="$ROOT" \
+  REVIEW_LOOP_SERVE_TOKEN="$TOKEN" REVIEW_LOOP_SERVE_PAGE="$SERVE_PAGE" REVIEW_LOOP_SERVE_DIR="$SERVE_DIR" REVIEW_LOOP_SERVE_ROOT="$ROOT" \
   REVIEW_LOOP_SERVE_SCRIPTS="$RL_SCRIPTS_DIR" REVIEW_LOOP_SERVE_PORT="$PORT" REVIEW_LOOP_SERVE_DIRS="$(printf '%s\n' "${DIRS[@]}")" \
   exec python3 - << 'PY_SERVER'
-import json, os, subprocess, sys
+import json, os, shutil, subprocess, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TOKEN = os.environ["REVIEW_LOOP_SERVE_TOKEN"]
 PAGE = os.environ["REVIEW_LOOP_SERVE_PAGE"]
+SERVE_DIR = os.environ["REVIEW_LOOP_SERVE_DIR"]
 ROOT = os.environ["REVIEW_LOOP_SERVE_ROOT"]
 SCRIPTS = os.environ["REVIEW_LOOP_SERVE_SCRIPTS"]
 PORT = int(os.environ["REVIEW_LOOP_SERVE_PORT"])
 DIRS = [d for d in os.environ.get("REVIEW_LOOP_SERVE_DIRS", "").split("\n") if d]
-KEY_RE = __import__("re").compile(r"^[a-z_]+(\.[a-z_]+)?$")
 NAME_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_-]*$")
+# The known configuration keys, from config.sh itself, so every key in a request
+# is checked before anything is written.
+KNOWN = set()
+try:
+    KNOWN = {k["key"] for k in json.loads(subprocess.run(["bash", os.path.join(SCRIPTS, "config.sh"), "keys", "--json"],
+             cwd=ROOT, capture_output=True, text=True).stdout)["keys"]}
+except Exception:
+    pass
 
 def regenerate():
-    args = ["bash", os.path.join(SCRIPTS, "dashboard.sh"), "--no-open", "--out", PAGE, "--serve-token", TOKEN]
+    args = ["bash", os.path.join(SCRIPTS, "dashboard.sh"), "--no-open", "--out", PAGE, "--serve-token", TOKEN, "--with-user-config"]
     for d in DIRS:
         args += ["--dir", d]
     subprocess.run(args, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=dict(os.environ, REVIEW_LOOP_DASHBOARD_OPEN="0"))
+    try:
+        os.chmod(PAGE, 0o600)
+    except OSError:
+        pass
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
@@ -232,9 +272,16 @@ class Handler(BaseHTTPRequestHandler):
         unsets = req.get("unset") or []
         if not isinstance(sets, dict) or not isinstance(unsets, list):
             self._json(400, {"ok": False, "output": "bad payload"}); return
+        # Validate every key of both operations before either runs, so a bad
+        # unset can never follow a set that already changed the file.
         for k in list(sets) + list(unsets):
-            if not isinstance(k, str) or not KEY_RE.match(k):
-                self._json(400, {"ok": False, "output": "bad key %r" % (k,)}); return
+            if not isinstance(k, str) or k not in KNOWN:
+                self._json(400, {"ok": False, "output": "unknown key %r" % (k,)}); return
+        if set(sets) & set(unsets):
+            self._json(400, {"ok": False, "output": "a key cannot be both set and unset"}); return
+        for k, v in sets.items():
+            if not isinstance(v, (str, int, float, bool)):
+                self._json(400, {"ok": False, "output": "bad value for %s" % k}); return
         outputs, ok = [], True
         cfg = os.path.join(SCRIPTS, "config.sh")
         if sets:
@@ -248,12 +295,27 @@ class Handler(BaseHTTPRequestHandler):
             outputs.append("nothing to change")
         self._json(200 if ok else 422, {"ok": ok, "output": "".join(outputs)})
 
+import signal
+signal.signal(signal.SIGTERM, lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
 HTTPServer.allow_reuse_address = True
-srv = HTTPServer(("127.0.0.1", PORT), Handler)
+status = 0
 try:
-    srv.serve_forever()
+    # Binding happens inside the cleanup block: a port that is invalid or in
+    # use must not leave the private page (token + user configuration) behind.
+    srv = HTTPServer(("127.0.0.1", PORT), Handler)
+    try:
+        srv.serve_forever()
+    finally:
+        srv.server_close()
 except KeyboardInterrupt:
     pass
+except OSError as e:
+    sys.stderr.write("review-loop dashboard: cannot listen on 127.0.0.1:%d (%s)\n" % (PORT, e.strerror or e))
+    status = 1
+finally:
+    # The private page never outlives the server, whether it ran or failed to start.
+    shutil.rmtree(SERVE_DIR, ignore_errors=True)
+sys.exit(status)
 PY_SERVER
 fi
 

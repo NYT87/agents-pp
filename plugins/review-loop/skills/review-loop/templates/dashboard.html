@@ -570,9 +570,10 @@ if (typeof module !== 'undefined') module.exports = RL;
   const targetValue = (k) => { const f = cfgTargetFile(); const sec = sectionOf(cfgState); const base = sec.length ? RL.getPath(f.values, sec.join('.')) : f.values; return RL.getPath(base, k.key); };
   function cfgRender() {
     const sc = cfgState, show = CFG.show;
-    $('#cfg-hint').textContent = DATA.serve
+    $('#cfg-hint').textContent = (DATA.serve
       ? `Edit values and press Apply: changes are written through config.sh (provider "${show.provider || 'none'}"). Each value shows where it comes from; a value set by a higher-precedence file masks what you write, and config.sh warns about that.`
-      : `Edit values, then copy the command or save the file. This is a static page: nothing is written until you run the command or save. Run "dashboard.sh --serve" to apply changes directly with validation.`;
+      : `Edit values, then copy the command or save the file. This is a static page: nothing is written until you run the command or save. Run "dashboard.sh --serve" to apply changes directly with validation.`)
+      + (show.redacted_user_config ? ' Values from your user configuration (~) and environment are hidden in this static page so it can be shared; use --with-user-config or --serve to see them.' : '');
     $('#cfg-scope').innerHTML = `
       <label>Write to <select id="cfg-scope-sel">
         <option value="project|shared">project shared file</option>
@@ -618,8 +619,9 @@ if (typeof module !== 'undefined') module.exports = RL;
         + (inTarget ? `<button type="button" class="mini" data-unset="${k.key}" title="remove ${k.key} from the target file so it is inherited again">${removed ? 'keep' : 'unset'}</button>` : '')
         + `<button type="button" class="mini" data-force="${k.key}" title="write this value to the target even if it equals the effective value" style="${(sc.form[k.key] === sc.initial[k.key] && !removed) ? '' : 'display:none'}">${sc.force.has(k.key) ? 'writing' : 'write'}</button>`
         + `</span>`;
-      const tgt = inTarget ? ` · in target: ${esc(tv === '' ? '(empty)' : tv)}` : ' · not in target';
-      return `<div class="cfg-row" data-row="${k.key}"><label title="${esc(k.help)}">${esc(k.key)} <span class="src">· ${esc(srcOf(k.key))}${tgt}</span></label>${input}<div class="src"><span class="err" data-err="${k.key}"></span>${esc(k.help)} ${tools}</div></div>`;
+      const hidden = (CFG.show.redacted_user_config && /^(user |env )/.test(srcOf(k.key)));
+      const tgt = cfgTargetFile().redacted ? ' · target contents hidden' : inTarget ? ` · in target: ${esc(tv === '' ? '(empty)' : tv)}` : ' · not in target';
+      return `<div class="cfg-row" data-row="${k.key}"><label title="${esc(k.help)}">${esc(k.key)} <span class="src">· ${esc(srcOf(k.key))}${hidden ? ' (value hidden)' : ''}${tgt}</span></label>${input}<div class="src"><span class="err" data-err="${k.key}"></span>${esc(k.help)} ${tools}</div></div>`;
     }).join('');
     $('#cfg-grid').querySelectorAll('[data-key]').forEach(el => {
       const h = () => { sc.form[el.dataset.key] = el.type === 'checkbox' ? String(el.checked) : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; const fb = $(`[data-force="${el.dataset.key}"]`); if (fb) fb.style.display = sc.form[el.dataset.key] === sc.initial[el.dataset.key] ? '' : 'none'; cfgUpdate(); };
@@ -648,7 +650,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     $('#cfg-cmd').textContent = !n ? '# no changes' : bad ? '# enter a valid provider name' : errText ? '# fix: ' + errText : RL.buildCommand(CFG.script, sc, ch);
     const ok = n > 0 && !bad && !errText;
     const ap = $('#cfg-apply'); if (ap) ap.disabled = !ok;
-    $('#cfg-save').disabled = !ok || (!canPick() && t.exists);
+    $('#cfg-save').disabled = !ok || (!canPick() && (t.exists || t.redacted));
     $('#cfg-copy').disabled = !ok;
   }
   function cfgOut(text, cls) { const o = $('#cfg-out'); o.textContent = text; o.className = 'cfg-out ' + (cls || ''); }
@@ -685,7 +687,7 @@ if (typeof module !== 'undefined') module.exports = RL;
         cfgOut(`saved ${h.name} (merged into its current contents). Make sure it is ${f.path} so config.sh and the loop read it.`, 'ok'); return;
       } catch (e) { if (e && e.name === 'AbortError') return; cfgOut('save failed: ' + e, 'err'); return; }
     }
-    if (f.exists) { cfgOut(`${f.path} already exists and this browser cannot re-read it safely; run the command above instead (it merges through config.sh).`, 'err'); return; }
+    if (f.exists || f.redacted) { cfgOut(`${f.path} already exists and this browser cannot re-read it safely; run the command above instead (it merges through config.sh).`, 'err'); return; }
     const doc = RL.applyToFile({}, section, ch, CFG.keys || []);
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' })); a.download = name; a.click();
     cfgOut(`downloaded ${name}; move it to ${f.path}`, 'ok');
