@@ -18,8 +18,9 @@ With no arguments it reads everything from the config file (`dashboard.dirs`,
 page in the browser. Report where the page was written and how many loops it
 contains. The page is self-contained (no network needed) and can be
 regenerated at any time; with `"dashboard": {"auto": true}` in the config it is
-regenerated automatically whenever a loop ends. The page's Configuration
-panel lets the user edit the config: on the static page it shows the
+regenerated automatically whenever a loop ends. The page has three views: the
+main page (stats and loop list), one page per loop (`#/loop/<id>`), and the
+configuration page (`#/config`, header button), which lets the user edit the config: on the static page it shows the
 `config.sh` command to run (or saves the file via the browser); with `--serve`
 changes apply directly. `--serve` keeps running until Ctrl-C, so only use it
 when the user asks for it, and run it in the background.

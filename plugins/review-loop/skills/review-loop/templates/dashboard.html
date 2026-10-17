@@ -35,6 +35,13 @@
   header h1 { font-size: 20px; margin: 0; }
   header .meta { color: var(--muted); font-size: 12px; flex-basis: 100%; order: 3; word-break: break-all; }
   header .spacer { flex: 1; }
+  header h1 a { color: inherit; text-decoration: none; }
+  .nav { display: flex; gap: 8px; align-items: center; }
+  .navbtn { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; text-decoration: none; }
+  .navbtn:hover { background: var(--hover); }
+  .navbtn.active { background: var(--s1); color: #fff; border-color: transparent; }
+  .view { display: none; } .view.active { display: block; }
+  .crumbs { margin: 0 0 12px; font-size: 13px; } .crumbs a { color: var(--ink-2); text-decoration: none; } .crumbs a:hover { color: var(--s1); }
   button, select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
   button:hover, select:hover { background: var(--hover); }
   .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px; font-size: 13px; color: var(--ink-2); }
@@ -73,7 +80,7 @@
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   #tooltip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); display: none; z-index: 10; max-width: 320px; }
   /* detail */
-  #detail { margin-top: 20px; }
+  #detail { margin-top: 0; }
   .detail-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 6px; }
   .detail-head h2 { margin: 0; font-size: 16px; }
   .kv { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; margin-bottom: 12px; }
@@ -125,66 +132,81 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Review loops</h1>
+    <h1><a href="#/" id="home-link">Review loops</a></h1>
     <span class="meta" id="meta"></span>
     <span class="spacer"></span>
-    <button id="theme" type="button" title="Toggle theme">Theme</button>
+    <nav class="nav">
+      <a href="#/" class="navbtn" id="nav-home">Loops</a>
+      <a href="#/config" class="navbtn" id="nav-config">Configuration</a>
+      <button id="theme" type="button" title="Toggle theme">Theme</button>
+    </nav>
   </header>
 
-  <div class="filters">
-    <label>Outcome <select id="f-outcome"><option value="">all</option></select></label>
-    <label>Backend <select id="f-backend"><option value="">all</option></select></label>
-    <span id="f-count"></span>
-  </div>
+  <!-- Page 1: stats and the list of loops -->
+  <section class="view" id="view-home">
+    <div class="filters">
+      <label>Outcome <select id="f-outcome"><option value="">all</option></select></label>
+      <label>Backend <select id="f-backend"><option value="">all</option></select></label>
+      <span id="f-count"></span>
+    </div>
 
-  <div class="tiles" id="tiles"></div>
+    <div class="tiles" id="tiles"></div>
 
-  <div class="grid2">
+    <div class="grid2">
+      <div class="card">
+        <h2>Rounds per loop</h2>
+        <div class="hint">Review rounds until the loop ended. The cap is shown as a faint marker.</div>
+        <div id="chart-rounds"></div>
+      </div>
+      <div class="card" id="card-time">
+        <h2>Time per loop</h2>
+        <div class="hint">Minutes spent per agent across all rounds: coder time runs from the start of a round to the review (pauses excluded); review time is the reviewer run.</div>
+        <div class="legend"><span><i style="background:var(--s1)"></i>coder</span><span><i style="background:var(--s2)"></i>reviewer</span></div>
+        <div id="chart-time"></div>
+        <div class="hint" id="time-note"></div>
+      </div>
+      <div class="card" id="card-tokens">
+        <h2>Tokens per loop</h2>
+        <div class="hint">Output tokens by agent, loops with usage tracking only. Input and cache figures are in the loop page.</div>
+        <div class="legend"><span><i style="background:var(--s1)"></i>coder</span><span><i style="background:var(--s2)"></i>reviewer</span></div>
+        <div id="chart-tokens"></div>
+      </div>
+    </div>
+
     <div class="card">
-      <h2>Rounds per loop</h2>
-      <div class="hint">Review rounds until the loop ended. The cap is shown as a faint marker.</div>
-      <div id="chart-rounds"></div>
+      <h2>Loops</h2>
+      <div class="hint">Click a row to open the loop's page with its full comment trail.</div>
+      <div style="overflow:auto">
+      <table id="loops">
+        <thead><tr>
+          <th>Started</th><th>Task</th><th>Outcome</th><th class="num">Rounds</th><th class="opt">Backend</th><th class="num opt">Coder</th><th class="num opt">Review</th><th class="num opt">Cost</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      </div>
     </div>
-    <div class="card" id="card-time">
-      <h2>Time per loop</h2>
-      <div class="hint">Minutes spent per agent across all rounds: coder time runs from the start of a round to the review (pauses excluded); review time is the reviewer run.</div>
-      <div class="legend"><span><i style="background:var(--s1)"></i>coder</span><span><i style="background:var(--s2)"></i>reviewer</span></div>
-      <div id="chart-time"></div>
-      <div class="hint" id="time-note"></div>
-    </div>
-    <div class="card" id="card-tokens">
-      <h2>Tokens per loop</h2>
-      <div class="hint">Output tokens by agent, loops with usage tracking only. Input and cache figures are in the loop detail.</div>
-      <div class="legend"><span><i style="background:var(--s1)"></i>coder</span><span><i style="background:var(--s2)"></i>reviewer</span></div>
-      <div id="chart-tokens"></div>
-    </div>
-  </div>
+  </section>
 
-  <div class="card" id="card-config">
-    <h2>Configuration</h2>
-    <div class="hint" id="cfg-hint"></div>
-    <div class="cfg-scope" id="cfg-scope"></div>
-    <div class="cfg-grid" id="cfg-grid"></div>
-    <div class="cfg-actions" id="cfg-actions"></div>
-    <pre class="cmd" id="cfg-cmd"></pre>
-    <div class="cfg-out" id="cfg-out"></div>
-    <details class="cfg-files" id="cfg-files"></details>
-  </div>
+  <!-- Page 2: one loop -->
+  <section class="view" id="view-loop">
+    <div class="crumbs"><a href="#/">← All loops</a></div>
+    <div id="detail"></div>
+  </section>
 
-  <div class="card">
-    <h2>Loops</h2>
-    <div class="hint">Click a row to see the full comment trail.</div>
-    <div style="overflow:auto">
-    <table id="loops">
-      <thead><tr>
-        <th>Started</th><th>Task</th><th>Outcome</th><th class="num">Rounds</th><th class="opt">Backend</th><th class="num opt">Coder</th><th class="num opt">Review</th><th class="num opt">Cost</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
+  <!-- Page 3: configuration -->
+  <section class="view" id="view-config">
+    <div class="crumbs"><a href="#/">← All loops</a></div>
+    <div class="card" id="card-config">
+      <h2>Configuration</h2>
+      <div class="hint" id="cfg-hint"></div>
+      <div class="cfg-scope" id="cfg-scope"></div>
+      <div class="cfg-grid" id="cfg-grid"></div>
+      <div class="cfg-actions" id="cfg-actions"></div>
+      <pre class="cmd" id="cfg-cmd"></pre>
+      <div class="cfg-out" id="cfg-out"></div>
+      <details class="cfg-files" id="cfg-files"></details>
     </div>
-  </div>
-
-  <div id="detail"></div>
+  </section>
 </div>
 <div id="tooltip"></div>
 
@@ -372,7 +394,18 @@ var RL = (function () {
     const stringify = d => JSON.stringify(d, null, 2).replace(re, '$1');
     return { doc, stringify, nonce };
   }
-  return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON };
+  // Hash routes: "#/" (stats + loops), "#/loop/<id>" (one loop), "#/config".
+  // A bare "#<loop-id>" is the older deep-link form and still opens the loop.
+  function parseRoute(hash) {
+    let h;
+    try { h = decodeURIComponent((hash || '').replace(/^#/, '')); } catch (e) { return { view: 'home' }; }
+    if (h === '/config' || h === 'config') return { view: 'config' };
+    let m = /^\/loop\/(.+)$/.exec(h);
+    if (m) return { view: 'loop', id: m[1] };
+    if (/^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(h)) return { view: 'loop', id: h };
+    return { view: 'home' };
+  }
+  return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
 </script>
@@ -395,7 +428,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
     root.dataset.theme = dark ? 'light' : 'dark';
     try { localStorage.setItem('rl-theme', root.dataset.theme); } catch (e) {}
-    render();
+    route();
   };
 
   // ── derive ───────────────────────────────────────────────────────────────
@@ -407,7 +440,7 @@ if (typeof module !== 'undefined') module.exports = RL;
   [...new Set(loops.map(l => l.outcome))].sort().forEach(o => fo.insertAdjacentHTML('beforeend', `<option value="${esc(o)}">${esc((OUTCOME[o] || ['', o])[1])}</option>`));
   [...new Set(loops.map(l => l.st.backend).filter(Boolean))].sort().forEach(b => fb.insertAdjacentHTML('beforeend', `<option value="${esc(b)}">${esc(b)}</option>`));
   fo.onchange = fb.onchange = render;
-  let selected = null;
+  let selected = null;   // loop id shown on the loop page
   const visible = () => loops.filter(l => (!fo.value || l.outcome === fo.value) && (!fb.value || l.st.backend === fb.value));
 
   // ── tooltip ──────────────────────────────────────────────────────────────
@@ -482,9 +515,10 @@ if (typeof module !== 'undefined') module.exports = RL;
     if (!u || !u.any) return '';
     return `<tr><td>${esc(label)}</td><td class="num">${fmtNum(u.input_tokens)}</td><td class="num">${fmtNum(u.cached_input_tokens)}</td><td class="num">${fmtNum(u.cache_write_tokens)}</td><td class="num">${fmtNum(u.output_tokens)}</td><td class="num">${fmtNum(u.reasoning_tokens)}</td><td class="num">${fmtCost(u.cost_usd)}</td></tr>`;
   }
+  // Header metadata is the same on every page: set it once, before routing.
+  $('#meta').textContent = `${DATA.root} · generated ${fmtDate(DATA.generated_at)}`;
   function render() {
     const rows = visible();
-    $('#meta').textContent = `${DATA.root} · generated ${fmtDate(DATA.generated_at)}`;
     $('#f-count').textContent = `${rows.length} of ${loops.length} loop${loops.length === 1 ? '' : 's'}`;
 
     // tiles
@@ -537,7 +571,6 @@ if (typeof module !== 'undefined') module.exports = RL;
       <td class="num opt" title="review time, all rounds">${l.reviewTime ? fmtDur(l.reviewTime) : '–'}</td>
       <td class="num opt">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No loops match.</td></tr>';
     document.querySelectorAll('#loops tbody tr[data-id]').forEach(tr => tr.onclick = () => select(tr.dataset.id));
-    renderDetail();
   }
 
   // ── configuration panel ──────────────────────────────────────────────────
@@ -693,17 +726,28 @@ if (typeof module !== 'undefined') module.exports = RL;
     cfgOut(`downloaded ${name}; move it to ${f.path}`, 'ok');
   }
 
-  function select(id) {
-    selected = id === selected ? null : id;
-    try { history.replaceState(null, '', selected ? '#' + selected : location.pathname); } catch (e) {}
-    render();
-    if (selected) $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Navigation: every page is a hash route, so links are shareable and the
+  // browser's back button works.
+  function select(id) { location.hash = '#/loop/' + encodeURIComponent(id); }
+  function showView(name) {
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+    $('#nav-home').classList.toggle('active', name === 'home' || name === 'loop');
+    $('#nav-config').classList.toggle('active', name === 'config');
+    document.title = name === 'config' ? 'Review loops · configuration' : name === 'loop' && selected ? 'Review loop ' + selected : 'Review loops';
+  }
+  let cfgReady = false;
+  function route() {
+    const r = RL.parseRoute(location.hash);
+    if (r.view === 'loop') { selected = r.id; showView('loop'); renderDetail(); }
+    else if (r.view === 'config') { showView('config'); if (!cfgReady) { cfgInit(); cfgReady = true; } }
+    else { selected = null; showView('home'); render(); }
+    window.scrollTo(0, 0);
   }
 
   function renderDetail() {
     const l = loops.find(x => x.id === selected);
     const d = $('#detail');
-    if (!l) { d.innerHTML = ''; return; }
+    if (!l) { d.innerHTML = `<div class="card"><div class="empty">No loop with id "${esc(selected || '')}" in this dashboard. <a href="#/">Back to all loops</a>.</div></div>`; return; }
     const byRound = {}; l.rounds.forEach(r => byRound[r.round] = r);
     const roundsHtml = l.files.map(f => {
       const r = byRound[f.round] || {};
@@ -721,7 +765,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       </div>`;
     }).join('');
     d.innerHTML = `<div class="card">
-      <div class="detail-head"><h2>${esc(l.task)}</h2>${chip(l.outcome)}<span class="spacer"></span><button type="button" id="close">Close</button></div>
+      <div class="detail-head"><h2>${esc(l.task)}</h2>${chip(l.outcome)}<span class="spacer"></span><a class="navbtn" href="#/">All loops</a></div>
       <div class="kv"><span>id <b class="mono">${esc(l.id)}</b></span><span>backend <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}</b></span>
         <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b></span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
         ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
@@ -730,13 +774,10 @@ if (typeof module !== 'undefined') module.exports = RL;
       ${roundsHtml || '<div class="empty">No rounds yet.</div>'}
       ${l.summary ? `<div class="round"><h3>Summary</h3><div class="doc"><div class="md">${md(l.summary)}</div></div></div>` : ''}
     </div>`;
-    $('#close').onclick = () => select(null);
   }
 
-  const initial = decodeURIComponent(location.hash.slice(1));
-  if (initial && loops.some(l => l.id === initial)) selected = initial;
-  render();
-  cfgInit();
+  window.addEventListener('hashchange', route);
+  route();
 })();
 </script>
 </body>

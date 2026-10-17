@@ -1179,6 +1179,13 @@ if command -v node > /dev/null 2>&1; then
     console.log([RL.minutesFloor(94), RL.minutesFloor(96), RL.minutesFloor(5), RL.minutesFloor(0), RL.minutesFloor(null)].join(","));
   ' "$DERIVE")
   assert_contains "derive: complete / partial / none / empty" "complete 150 30 partial 75 2 3 35 none 0 none" "$OUT"
+  ROUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const r = h => { const x = RL.parseRoute(h); return x.view + (x.id ? ":" + x.id : ""); };
+    console.log([r(""), r("#"), r("#/"), r("#/config"), r("#config"), r("#/loop/20261015-120000-abcdef"), r("#20261015-120000-abcdef"),
+      r("#/loop/with%20space"), r("#/nope"), r("#/loop/"), r("#/loop/%E0%A4%A"), r("#%")].join("|"));
+  ' "$DERIVE")
+  assert_eq "parseRoute: home, config, loop and legacy deep links" "home|home|home|config|config|loop:20261015-120000-abcdef|loop:20261015-120000-abcdef|loop:with space|home|home|home|home" "$ROUT"
   assert_contains "fmtDur never rounds up" "59s|1m 30s|2m|1h 02m|59m 59s|–|" "$OUT"
   assert_contains "partial 90s shows an honest lower bound" "|≥ 1m 30s*|at least 1m 30s (1 of 2 rounds recorded)|2m 30s|–" "$OUT"
   assert_contains "chart minutes floor (94s -> 1.5, never 1.6)" "1.5,1.6,0,0,0" "$OUT"
@@ -1205,6 +1212,11 @@ assert_eq "dashboard embeds sources" '"project shared"' "$(jq .config.show.sourc
 CABS="$(cd "$(dirname "$C")" && pwd)/config.sh"
 assert_eq "dashboard embeds the config.sh path" "$CABS" "$(jq -r .config.script <<< "$D")"
 assert_eq "static page has no serve token" "null" "$(jq .serve <<< "$D")"
+H=$(cat "$R/.review-loop/dashboard.html")
+for v in view-home view-loop view-config; do assert_contains "page has the $v section" "id=\"$v\"" "$H"; done
+assert_contains "header links to the configuration page" 'href="#/config"' "$H"
+assert_contains "loop page links back to all loops" '← All loops' "$H"
+assert_eq "configuration card lives only in the config view" "1" "$(printf '%s' "$H" | grep -c 'id="card-config"')"
 mkdir -p "$R/.codex" "$HOME/.opencode"; echo '{"max_rounds": 2, "model": "o"}' > "$R/.codex/review-loop.json"; echo '{"dir": "oc"}' > "$HOME/.opencode/review-loop.json"
 mkdir -p "$R/.not a provider"; echo '{}' > "$R/.not a provider/review-loop.json"
 (cd "$R" && bash "$S/dashboard.sh" --with-user-config > /dev/null)
