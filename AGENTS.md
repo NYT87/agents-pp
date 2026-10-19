@@ -9,7 +9,7 @@ runtime deps are `jq` and optionally `git`.
 ## Layout
 
 - `skills/review-loop/scripts/lib.sh` — all shared helpers (config, state, verdict parsing, finalize). Source it; never duplicate its logic.
-- `scripts/start.sh | status.sh | cancel.sh` — user-facing lifecycle.
+- `scripts/start.sh | status.sh | cancel.sh | continue.sh` — user-facing lifecycle. `continue.sh` re-opens a loop that stopped at its cap and belongs to the current project (`state.root`; `max_rounds` += N, pointer written first, then the state — rolled back together on failure — then `state.extensions[]` appended) and then runs `review.sh`, whose resume path applies the last review's pending transition; it never advances a round itself. A session change on continue stores the old session's coder total in `state.sessions[]`, restores `coder_usage_cum` from the new session's stored total (if it was used before), sets `coder_usage_carry` to the other sessions' totals (added by `rl_coder_usage_total`), and clears `transcript_path`/`coder_usage_base`.
 - `scripts/config.sh` — the only writer of the config files (show/create/set/unset/init/gitignore/keys); key list, types and validation live there. The `/review-config` skill asks the questions and calls it.
 - Config files are provider-neutral (`rl_config_files`, `rl_provider`, `rl_resolve_config` in `lib.sh`): shared `./.review-loop.json` and `~/.config/review-loop/config.json` (top-level keys plus `providers.<name>` sections) and per-provider `./.<provider>/review-loop.json`. Never read a config path directly; always go through `rl_resolve_config`.
 - `scripts/review.sh` — runs a backend and owns every state transition (round advance, approve, cap).

@@ -67,7 +67,8 @@ When the implementation is complete:
      ignore comments, and do not blindly accept wrong ones. Then write the next
      `round-NN-coder.md` and run `review.sh` again.
    - **Maximum rounds reached**: read the summary, report the unresolved
-     comments to the user, and stop.
+     comments to the user, and stop. The user can give the loop more rounds
+     with `/review-continue [N]`.
    - If `review.sh` fails (missing coder summary, backend error), fix the cause
      it names and run it again.
 

@@ -587,6 +587,21 @@ rl_coder_usage_cumulative() {
   rl_transcript_usage "$tp" "$started"
 }
 
+# rl_coder_usage_total LOOP_DIR -> the coder's usage over the whole loop: the
+# current session's cumulative total plus what earlier sessions accumulated
+# before the loop was continued elsewhere (coder_usage_carry, set by
+# continue.sh). Fails only when neither is known.
+rl_coder_usage_total() {
+  local cum carry
+  carry=$(jq -c '.coder_usage_carry // empty' "$1/state.json" 2>/dev/null)
+  if cum=$(rl_coder_usage_cumulative "$1"); then
+    if [ -n "$carry" ]; then rl_usage_add "$carry" "$cum"; else echo "$cum"; fi
+    return 0
+  fi
+  [ -n "$carry" ] || return 1
+  echo "$carry"
+}
+
 # rl_reviewer_usage_total LOOP_DIR -> sum of reviewer usage over recorded rounds
 rl_reviewer_usage_total() {
   local total="$RL_USAGE_ZERO" u
@@ -614,7 +629,7 @@ rl_usage_table() {
     if [ "$reviewer" != "null" ]; then rl_usage_row "round $round reviewer" "$reviewer" "$dur"
     else echo "| round $round reviewer | unknown (record restored from the review) | - | - | - | - | - | - | - | - |"; fi
   done < <(jq -r '.rounds[]? | [.round, (.coder | tojson), (.reviewer | tojson), (.duration_s // "-"), (.coder_duration_s // "-")] | @tsv' "$dir/state.json" 2>/dev/null)
-  coder_total=$(rl_coder_usage_cumulative "$dir") || coder_total=""
+  coder_total=$(rl_coder_usage_total "$dir") || coder_total=""
   reviewer_total=$(rl_reviewer_usage_total "$dir")
   if [ -n "$coder_total" ]; then rl_usage_row "TOTAL coder" "$coder_total"; else echo "| TOTAL coder | n/a (no session transcript found) | | | | | | | | |"; fi
   # The total only covers rounds with usage: say so when a reviewed round
@@ -662,6 +677,7 @@ rl_finalize() {
     echo "- loop_id: $loop_id"
     echo "- outcome: $outcome"
     echo "- rounds: ${round:-0}"
+    jq -r '.extensions // [] | if length > 0 then "- extended: \(map(.rounds) | add) extra round(s) in \(length) extension(s) (continue.sh)" else empty end' "$dir/state.json" 2>/dev/null || true
     echo "- backend: $backend"
     echo "- finished_at: $(rl_now)"
     [ -n "$detail" ] && { echo; echo "$detail"; }
@@ -701,15 +717,21 @@ rl_finalize() {
     '.active = false | .phase = $p | .outcome = $o | .finished_at = $t' || true
   rm -f "$root/$RL_POINTER_REL"
   rl_log "$dir" "finalized: outcome=$outcome phase=$phase"
-  local cfg dargs=() d
+  rl_dashboard_auto "$dir" "$root"
+}
+
+# rl_dashboard_auto LOOP_DIR ROOT -> regenerate the dashboard when config
+# dashboard.auto is on (called whenever a loop's state changes hands: it ends,
+# or it is continued after its cap).
+rl_dashboard_auto() {
+  local dir="$1" root="$2" cfg dargs=() d
   cfg=$(cd "$root" && rl_resolve_config)
-  if [ "$(jq -r '.dashboard.auto == true' <<< "$cfg")" = "true" ]; then
-    # Scan the configured dirs plus this loop's own storage dir, so a loop
-    # started with --dir elsewhere still shows up (dashboard.sh deduplicates).
-    while IFS= read -r d; do [ -n "$d" ] && dargs+=(--dir "$d"); done \
-      < <(jq -r 'if (.dashboard.dirs | length) > 0 then .dashboard.dirs[] else .dir end' <<< "$cfg")
-    d=$(rl_state_get "$dir" dir); [ -n "$d" ] && dargs+=(--dir "$d")
-    (cd "$root" && REVIEW_LOOP_DASHBOARD_OPEN=0 bash "$RL_SCRIPTS_DIR/dashboard.sh" "${dargs[@]}" > /dev/null 2>&1) \
-      && rl_log "$dir" "dashboard regenerated" || rl_log "$dir" "dashboard regeneration failed"
-  fi
+  [ "$(jq -r '.dashboard.auto == true' <<< "$cfg")" = "true" ] || return 0
+  # Scan the configured dirs plus this loop's own storage dir, so a loop
+  # started with --dir elsewhere still shows up (dashboard.sh deduplicates).
+  while IFS= read -r d; do [ -n "$d" ] && dargs+=(--dir "$d"); done \
+    < <(jq -r 'if (.dashboard.dirs | length) > 0 then .dashboard.dirs[] else .dir end' <<< "$cfg")
+  d=$(rl_state_get "$dir" dir); [ -n "$d" ] && dargs+=(--dir "$d")
+  (cd "$root" && REVIEW_LOOP_DASHBOARD_OPEN=0 bash "$RL_SCRIPTS_DIR/dashboard.sh" "${dargs[@]}" > /dev/null 2>&1) \
+    && rl_log "$dir" "dashboard regenerated" || rl_log "$dir" "dashboard regeneration failed"
 }

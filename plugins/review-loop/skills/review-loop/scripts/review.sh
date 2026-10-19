@@ -61,6 +61,8 @@ review-loop: CHANGES REQUESTED in round $ROUND (coder $([ "$UNDERESTIMATED" = tr
 
 The loop is finished without approval. Read the summary, report the unresolved
 comments (by ID) to the user, and stop. Do not continue changing code.
+To go on with more rounds instead, the user can run /review-continue [N]
+(bash $RL_SCRIPTS_DIR/continue.sh --rounds N).
 OUT
     exit 0
   fi

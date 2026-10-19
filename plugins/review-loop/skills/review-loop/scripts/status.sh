@@ -16,7 +16,7 @@ NN=$(rl_round_nn "$ROUND")
 echo "Review loop: $RL_LOOP_ID"
 echo "  dir:         $RL_LOOP_DIR"
 echo "  phase:       $(rl_state_get "$RL_LOOP_DIR" phase)"
-echo "  round:       $ROUND / $(rl_state_get "$RL_LOOP_DIR" max_rounds)"
+echo "  round:       $ROUND / $(rl_state_get "$RL_LOOP_DIR" max_rounds)$(jq -r '.extensions // [] | if length > 0 then " (extended: +\(map(.rounds) | add) round(s) in \(length) extension(s))" else "" end' "$RL_LOOP_DIR/state.json")"
 echo "  backend:     $(rl_state_get "$RL_LOOP_DIR" backend) (model: $(rl_state_get "$RL_LOOP_DIR" model | sed 's/^$/default/'))"
 echo "  usage:       $(rl_usage_enabled "$RL_LOOP_DIR" && echo on || echo off)"
 echo "  prompts:     $(jq -r '.prompts // {} | "reviewer \(.reviewer // "" | if . == "" then "default" else . end) (+ \(.reviewer_extra // "" | if . == "" then "no extra" else . end)), coder \(.coder // "" | if . == "" then "default" else . end) (+ \(.coder_extra // "" | if . == "" then "no extra" else . end))"' "$RL_LOOP_DIR/state.json")"

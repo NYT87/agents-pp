@@ -38,7 +38,7 @@ Or, from a local checkout, for one session:
 claude --plugin-dir ./plugins/review-loop
 ```
 
-Skills are then available as `/review-loop:review-loop`, `/review-loop:review-status`, `/review-loop:review-cancel`, `/review-loop:review-dashboard` and `/review-loop:review-config`.
+Skills are then available as `/review-loop:review-loop`, `/review-loop:review-status`, `/review-loop:review-cancel`, `/review-loop:review-continue`, `/review-loop:review-dashboard` and `/review-loop:review-config`.
 
 ### As a standalone skill (no plugin)
 
@@ -46,11 +46,12 @@ Skills are then available as `/review-loop:review-loop`, `/review-loop:review-st
 cp -r plugins/review-loop/skills/review-loop   ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-status ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-cancel ~/.claude/skills/
+cp -r plugins/review-loop/skills/review-continue ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-dashboard ~/.claude/skills/
 cp -r plugins/review-loop/skills/review-config ~/.claude/skills/
 ```
 
-Skills are then `/review-loop`, `/review-status`, `/review-cancel`, `/review-dashboard`, `/review-config`. In this mode the loop is driven by the skill's instructions alone. To get the same Stop-hook enforcement as the plugin, add to `~/.claude/settings.json`:
+Skills are then `/review-loop`, `/review-status`, `/review-cancel`, `/review-continue`, `/review-dashboard`, `/review-config`. In this mode the loop is driven by the skill's instructions alone. To get the same Stop-hook enforcement as the plugin, add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -79,6 +80,7 @@ The second hook only records when a paused loop resumes (so the coder time of a 
 /review-loop Refactor the auth middleware --backend claude --model opus --max-rounds 3 --usage
 /review-status
 /review-cancel
+/review-continue 2          # the loop hit its cap: allow 2 more rounds and carry on
 ```
 
 What happens:
@@ -87,6 +89,7 @@ What happens:
 2. Claude implements the task, writes `round-01-coder.md` and runs `review.sh`.
 3. `review.sh` renders the reviewer prompt, runs the backend, validates the verdict and installs `round-01-review.md`. On `changes_requested` it advances to the next round and tells Claude what to do; on `approved`, or at the cap, it writes `summary.md` and ends the loop.
 4. If Claude tries to stop while the loop is active, the Stop hook blocks and repeats the instructions. Claude can pause for a genuine question by ending its message with `REVIEW-LOOP: PAUSE`.
+5. If the cap is reached without approval, `/review-continue [N]` (`continue.sh [N | --rounds N] [--loop ID]`) re-opens the loop where it stopped with N more rounds (default 1): the pointer comes back, `max_rounds` grows, the summary written at the cap is kept as `summary.before-extension-K.md`, and `review.sh` resumes from the last review — the reviewer is not run again — so the next round starts with that review's comments to address. The extension is recorded in `state.json` (`extensions[]`), shown by `/review-status`, the loop page and the final summary. Continuing from a different Claude Code session (the skill passes `--session`) keeps the coder usage right per session: each session's total so far is stored (`state.sessions[]`), the new rounds are measured on the new session's transcript, and returning to an earlier session counts only what it did since — so per-round numbers and the coder total never double count. Only a loop that ran out of rounds can be continued, only from the project it was started in (a storage dir can be shared by several projects), and not while another loop is active; if the pointer or the state cannot be written, the loop is left at its cap for a retry.
 
 ### The comment trail
 
@@ -302,11 +305,12 @@ agents-pp/
 │   └── skills/
 │       ├── review-loop/                   self-contained skill (copy this dir for standalone use)
 │       │   ├── SKILL.md
-│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, resume-hook.sh, status.sh, cancel.sh, dashboard.sh, config.sh
+│       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, resume-hook.sh, status.sh, cancel.sh, continue.sh, dashboard.sh, config.sh
 │       │   ├── scripts/backends/          codex.sh, claude.sh, fake.sh
 │       │   └── templates/                 reviewer-prompt.md, coder-brief.md, coder-summary.md, review-format.md, dashboard.html
 │       ├── review-status/SKILL.md
 │       ├── review-cancel/SKILL.md
+│       ├── review-continue/SKILL.md
 │       ├── review-dashboard/SKILL.md
 │       └── review-config/SKILL.md
 ├── tests/                                 bash test suite (fake backend)

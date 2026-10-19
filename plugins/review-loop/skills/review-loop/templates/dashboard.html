@@ -242,6 +242,8 @@ var RL = (function () {
     const files = Array.isArray(l.files) ? l.files : [];
     const roundCount = Math.max(rounds.length, files.filter(f => f.review).length, 0);
     const outcome = st.active ? (st.phase === 'paused' ? 'paused' : 'active') : (st.outcome || st.phase || 'failed');
+    // Rounds added by continue.sh after the loop hit its cap (0 when never extended).
+    const extendedRounds = (Array.isArray(st.extensions) ? st.extensions : []).reduce((a, e) => a + (Number(e.rounds) || 0), 0);
     const start = Date.parse(st.started_at), end = Date.parse(st.finished_at);
     const duration = (!isNaN(start) && !isNaN(end)) ? Math.round((end - start) / 1000) : null;
     const coder = sumUsage(rounds, 'coder'), reviewer = sumUsage(rounds, 'reviewer');
@@ -257,7 +259,7 @@ var RL = (function () {
     const coderTimeState = rounds.length === 0 || withCoder.length === 0 ? 'none'
       : (withCoder.length < rounds.length ? 'partial' : (underestimated ? 'underestimated' : 'complete'));
     const reviewTime = rounds.reduce((a, r) => a + (r.duration_s || 0), 0);
-    return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), st, rounds, roundCount, outcome, duration, coder, reviewer, cost,
+    return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), st, rounds, roundCount, outcome, duration, coder, reviewer, cost, extendedRounds,
       files, summary: l.summary, usage: !!st.usage || rounds.some(r => r.reviewer || r.coder), reviewerUnknown,
       coderTime, coderTimeState, coderRoundsRecorded: withCoder.length, coderRoundsUnderestimated: underestimated, reviewTime };
   }
@@ -835,7 +837,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     d.innerHTML = `<div class="card">
       <div class="detail-head"><h2>${esc(l.task)}</h2>${chip(l.outcome)}<span class="spacer"></span><a class="navbtn" href="#/">All loops</a></div>
       <div class="kv"><span>id <b class="mono">${esc(l.id)}</b></span><span>backend <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}</b></span>
-        <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b></span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
+        <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b>${l.extendedRounds ? ` <span class="src">(extended +${l.extendedRounds})</span>` : ''}</span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
         ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
         <span>coder time <b>${fmtCoderTime(l, true)}</b></span><span>review time <b>${fmtDur(l.reviewTime)}</b></span>
         ${l.usage ? `<span>cost <b>${fmtCost(l.cost)}</b></span>` : ''}<span>dir <b class="mono">${esc(l.dir)}</b></span>

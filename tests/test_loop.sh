@@ -130,6 +130,207 @@ assert_no_file "pointer removed" "$R/.claude/review-loop.active"
 assert_contains "summary lists unresolved ids" "R2-C1" "$(cat "$L/summary.md")"
 assert_contains "summary lists prior unresolved id" "R1-C1" "$(cat "$L/summary.md")"
 assert_eq "hook allows after cap" "{}" "$(hook "$R" s1)"
+# continue with extra rounds: the loop re-opens where it stopped and review.sh
+# resumes from the installed review (the reviewer is not run again)
+verdicts approved   # must stay queued: a resume never calls the backend
+OUT=$(cd "$R" && bash "$S/continue.sh" --rounds 2 --session sess-continue 2>&1); RC=$?
+assert_eq "continue succeeds" "0" "$RC"
+assert_contains "continue reports the new cap" "continued with 2 extra round(s): max rounds 2 -> 4" "$OUT"
+assert_contains "continue resumes the pending transition" "resuming its pending transition without running the reviewer again" "$OUT"
+assert_contains "continue starts the next round" "Now starting round 3" "$OUT"
+assert_eq "continue did not run the backend" "approved" "$(cat "$REVIEW_LOOP_FAKE_FILE")"
+assert_eq "continued loop is active" "true" "$(st "$L" active)"
+assert_eq "continued loop phase" "coding" "$(st "$L" phase)"
+assert_eq "continued loop cap" "4" "$(st "$L" max_rounds)"
+assert_eq "continued loop round" "3" "$(st "$L" round)"
+assert_eq "continued loop outcome cleared" "null" "$(jq .outcome "$L/state.json")"
+assert_eq "continued loop finished_at cleared" "null" "$(jq .finished_at "$L/state.json")"
+assert_eq "continued loop bound to the session" "sess-continue" "$(st "$L" session_id)"
+assert_eq "pointer restored" "$L" "$(pointer "$R")"
+assert_eq "extension recorded" '{"rounds":2,"from_max":2,"to_max":4,"at_round":2}' "$(jq -c '.extensions[0] | del(.at)' "$L/state.json")"
+assert_no_file "stale summary removed" "$L/summary.md"
+assert_file "stale summary kept aside" "$L/summary.before-extension-1.md"
+assert_contains "continue logged" "continued: +2 round(s), max_rounds 2 -> 4 (extension 1, at round 2)" "$(cat "$L/loop.log")"
+assert_contains "brief re-rendered for the new round" "round-NN-coder.md" "$(cat "$L/coder-brief.md")"
+assert_contains "hook enforces again after continue" "round 3 of 4" "$(reason "$(hook "$R" sess-continue)")"
+assert_contains "status shows the extension" "round:       3 / 4 (extended: +2 round(s) in 1 extension(s))" "$(cd "$R" && bash "$S/status.sh")"
+# continuing while a loop is active is refused
+OUT=$(cd "$R" && bash "$S/continue.sh" 2>&1); RC=$?
+assert_eq "continue refuses while a loop is active" "1" "$RC"
+assert_contains "continue names the active loop" "is still active (round 3 of 4)" "$OUT"
+# the extended loop runs to its new cap and can be continued again (bare N)
+coder "$L" 3; verdicts changes_requested; review "$R" > /dev/null
+coder "$L" 4; verdicts changes_requested
+OUT=$(review "$R")
+assert_contains "extended loop reaches the new cap" "maximum of 4 round(s) is reached" "$OUT"
+assert_contains "cap message hints at continuing" "/review-continue [N]" "$OUT"
+assert_contains "summary mentions the extension" "- extended: 2 extra round(s) in 1 extension(s)" "$(cat "$L/summary.md")"
+(cd "$R" && bash "$S/config.sh" set dashboard.auto=true dashboard.out=auto.html > /dev/null); rm -f "$R/auto.html"
+OUT=$(cd "$R" && bash "$S/continue.sh" 1 2>&1); RC=$?
+assert_eq "continue again with a bare count" "0" "$RC"
+assert_eq "second extension cap" "5" "$(st "$L" max_rounds)"
+assert_eq "second extension recorded" "2" "$(jq '.extensions | length' "$L/state.json")"
+assert_file "second stale summary kept aside" "$L/summary.before-extension-2.md"
+assert_file "continue regenerates the dashboard when auto is on" "$R/auto.html"
+assert_eq "the previous session binding is kept when none is given" "sess-continue" "$(jq -r .session_id "$L/state.json")"
+(cd "$R" && bash "$S/config.sh" unset dashboard.auto dashboard.out > /dev/null)
+coder "$L" 5; verdicts approved; review "$R" > /dev/null
+assert_eq "extended loop approved" "approved" "$(st "$L" outcome)"
+assert_contains "final summary counts both extensions" "- extended: 3 extra round(s) in 2 extension(s)" "$(cat "$L/summary.md")"
+# only a loop that ran out of rounds can be continued
+OUT=$(cd "$R" && bash "$S/continue.sh" 2>&1); RC=$?
+assert_eq "no loop at the cap: refused" "1" "$RC"
+assert_contains "no loop at the cap: explained" "no loop of this project stopped at its round cap in $R/.review-loop" "$OUT"
+OUT=$(cd "$R" && bash "$S/continue.sh" --loop "$(basename "$L")" 2>&1); RC=$?
+assert_eq "an approved loop cannot be continued" "1" "$RC"
+assert_contains "an approved loop: explained" "finished with outcome 'approved', not at its round cap" "$OUT"
+OUT=$(cd "$R" && bash "$S/continue.sh" --rounds 0 2>&1); RC=$?
+assert_eq "zero extra rounds refused" "1" "$RC"
+assert_contains "zero extra rounds explained" "must be a positive integer (got '0')" "$OUT"
+OUT=$(cd "$R" && bash "$S/continue.sh" --loop nope 2>&1); RC=$?
+assert_eq "invalid loop id refused" "1" "$RC"
+assert_eq "unknown argument refused" "1" "$(cd "$R" && bash "$S/continue.sh" --bogus > /dev/null 2>&1; echo $?)"
+# --loop picks a loop explicitly, --dir another storage dir
+R2=$(new_repo r2b); start "$R2" --max-rounds 1 --dir other "t" > /dev/null; L2=$(pointer "$R2"); echo x > "$R2/f"
+coder "$L2" 1; verdicts changes_requested; review "$R2" > /dev/null
+assert_eq "other dir: at the cap" "max_rounds_reached" "$(st "$L2" outcome)"
+assert_eq "default dir has no loop at the cap" "1" "$(cd "$R2" && bash "$S/continue.sh" > /dev/null 2>&1; echo $?)"
+verdicts approved
+OUT=$(cd "$R2" && bash "$S/continue.sh" --dir other --loop "$(basename "$L2")" 3 2>&1); RC=$?
+assert_eq "continue with --dir and --loop" "0" "$RC"
+assert_eq "explicit loop continued" "4" "$(st "$L2" max_rounds)"
+assert_eq "explicit loop advanced" "2" "$(st "$L2" round)"
+assert_eq "explicit loop pointer" "$L2" "$(pointer "$R2")"
+(cd "$R2" && bash "$S/cancel.sh" > /dev/null)
+# a storage dir shared by two projects: only this project's loops are candidates
+SHARED="$TMP/shared-loops"; RA=$(new_repo r2e); RB=$(new_repo r2f)
+start "$RA" --max-rounds 1 --dir "$SHARED" "task a" > /dev/null; LA=$(pointer "$RA"); echo x > "$RA/f"
+coder "$LA" 1; verdicts changes_requested; review "$RA" > /dev/null
+assert_eq "shared dir: project A's loop at the cap" "max_rounds_reached" "$(st "$LA" outcome)"
+OUT=$(cd "$RB" && bash "$S/continue.sh" --dir "$SHARED" 2>&1); RC=$?
+assert_eq "shared dir: project B does not pick A's loop" "1" "$RC"
+assert_contains "shared dir: B is told no loop of ITS own is at the cap" "no loop of this project stopped at its round cap in $SHARED" "$OUT"
+OUT=$(cd "$RB" && bash "$S/continue.sh" --dir "$SHARED" --loop "$(basename "$LA")" 2>&1); RC=$?
+assert_eq "shared dir: --loop on another project's loop refused" "1" "$RC"
+assert_contains "shared dir: the owning project is named" "belongs to another project ($RA)" "$OUT"
+assert_eq "shared dir: A's loop untouched by B" "max_rounds_reached false" "$(jq -r '"\(.outcome) \(.active)"' "$LA/state.json")"
+assert_no_file "shared dir: no pointer in B" "$RB/.claude/review-loop.active"
+verdicts approved
+OUT=$(cd "$RA" && bash "$S/continue.sh" --dir "$SHARED" 2>&1); RC=$?
+assert_eq "shared dir: the owner continues its loop" "0" "$RC"
+assert_eq "shared dir: owner's pointer" "$LA" "$(pointer "$RA")"
+(cd "$RA" && bash "$S/cancel.sh" > /dev/null)
+# a loop recorded without a root (older state) is still accepted anywhere
+start "$RA" --max-rounds 1 --dir "$SHARED" "task a2" > /dev/null; LA2=$(pointer "$RA"); echo y > "$RA/g"
+coder "$LA2" 1; verdicts changes_requested; review "$RA" > /dev/null
+jq 'del(.root)' "$LA2/state.json" > "$LA2/s.tmp" && mv "$LA2/s.tmp" "$LA2/state.json"; verdicts approved
+assert_eq "no recorded root: accepted" "0" "$(cd "$RB" && bash "$S/continue.sh" --dir "$SHARED" --loop "$(basename "$LA2")" > /dev/null 2>&1; echo $?)"
+assert_eq "no recorded root: continued" "true" "$(st "$LA2" active)"
+(cd "$RB" && bash "$S/cancel.sh" > /dev/null)
+# a pointer that cannot be written leaves the capped loop exactly as it was
+R6=$(new_repo r2g); start "$R6" --max-rounds 1 "t" > /dev/null; L6=$(pointer "$R6"); echo x > "$R6/f"
+coder "$L6" 1; verdicts changes_requested; review "$R6" > /dev/null
+BEFORE=$(jq -S . "$L6/state.json"); mkdir "$R6/.claude/review-loop.active"
+OUT=$(cd "$R6" && bash "$S/continue.sh" 2>&1); RC=$?
+assert_eq "unwritable pointer: continue fails" "1" "$RC"
+assert_contains "unwritable pointer: explained, loop left at its cap" "cannot write $R6/.claude/review-loop.active; the loop is left as it was (still at its cap)" "$OUT"
+assert_eq "unwritable pointer: state untouched" "$BEFORE" "$(jq -S . "$L6/state.json")"
+assert_file "unwritable pointer: summary untouched" "$L6/summary.md"
+assert_no_file "unwritable pointer: nothing kept aside" "$L6/summary.before-extension-1.md"
+rmdir "$R6/.claude/review-loop.active"; verdicts approved
+OUT=$(cd "$R6" && bash "$S/continue.sh" 2>&1); RC=$?
+assert_eq "retry after fixing the pointer succeeds" "0" "$RC"
+assert_eq "retry: loop continued" "true 2" "$(jq -r '"\(.active) \(.max_rounds)"' "$L6/state.json")"
+assert_file "retry: summary kept aside" "$L6/summary.before-extension-1.md"
+(cd "$R6" && bash "$S/cancel.sh" > /dev/null)
+# a state write that fails leaves no pointer behind either
+R7=$(new_repo r2h); start "$R7" --max-rounds 1 "t" > /dev/null; L7=$(pointer "$R7"); echo x > "$R7/f"
+coder "$L7" 1; verdicts changes_requested; review "$R7" > /dev/null
+cp "$L7/state.json" "$TMP/state-cap.json"; chmod 555 "$L7"
+OUT=$(cd "$R7" && bash "$S/continue.sh" 2>&1); RC=$?; chmod 755 "$L7"
+assert_eq "unwritable state: continue fails" "1" "$RC"
+assert_contains "unwritable state: explained" "cannot update $L7/state.json; the loop is left as it was" "$OUT"
+assert_no_file "unwritable state: pointer rolled back" "$R7/.claude/review-loop.active"
+assert_eq "unwritable state: state untouched" "$(jq -S . "$TMP/state-cap.json")" "$(jq -S . "$L7/state.json")"
+assert_file "unwritable state: summary untouched" "$L7/summary.md"
+# paths with spaces (project and storage dir): the default lookup must not split them
+R3=$(new_repo "r2 spaced"); start "$R3" --max-rounds 1 --dir "loop dir" "t" > /dev/null; L3=$(pointer "$R3"); echo x > "$R3/f"
+coder "$L3" 1; verdicts changes_requested; review "$R3" > /dev/null
+assert_eq "spaced paths: at the cap" "max_rounds_reached" "$(st "$L3" outcome)"
+verdicts approved
+OUT=$(cd "$R3" && bash "$S/continue.sh" --dir "loop dir" 2>&1); RC=$?
+assert_eq "spaced project and storage dir: continued without --loop" "0" "$RC"
+assert_contains "spaced paths: the capped loop was found" "Review loop $(basename "$L3") continued with 1 extra round(s)" "$OUT"
+assert_eq "spaced paths: advanced" "2" "$(st "$L3" round)"
+assert_eq "spaced paths: pointer restored" "$L3" "$(pointer "$R3")"
+(cd "$R3" && bash "$S/cancel.sh" > /dev/null)
+# usage across sessions: capped in session A, continued in session B. Round 1's
+# usage (A) is carried, round 2 is measured on B's transcript from scratch, and
+# the coder total is both.
+R4=$(new_repo r2c); mkdir -p "$HOME/.claude/projects/-r2c"
+SA="aaaaaaaa-sess-a"; SB="bbbbbbbb-sess-b"
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:01.000Z","message":{"id":"a1","model":"claude-x","usage":{"input_tokens":10,"output_tokens":100}}}' > "$HOME/.claude/projects/-r2c/$SA.jsonl"
+start "$R4" --max-rounds 1 --usage --session "$SA" "t" > /dev/null; L4=$(pointer "$R4"); echo x > "$R4/f"
+jq '.started_at = "2020-01-01T00:00:00Z"' "$L4/state.json" > "$L4/s.tmp" && mv "$L4/s.tmp" "$L4/state.json"
+coder "$L4" 1; verdicts changes_requested; review "$R4" > /dev/null
+assert_eq "session A: round 1 coder usage" "100" "$(jq '.rounds[0].coder.output_tokens' "$L4/state.json")"
+assert_eq "session A: at the cap" "max_rounds_reached" "$(st "$L4" outcome)"
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:02.000Z","message":{"id":"b1","model":"claude-y","usage":{"input_tokens":4,"output_tokens":40}}}' > "$HOME/.claude/projects/-r2c/$SB.jsonl"
+verdicts approved
+OUT=$(cd "$R4" && bash "$S/continue.sh" --session "$SB" 2>&1); RC=$?
+assert_eq "continue in session B succeeds" "0" "$RC"
+assert_eq "session B bound" "$SB" "$(st "$L4" session_id)"
+assert_eq "session change: old session recorded" "$SA" "$(jq -r '.sessions[0].id' "$L4/state.json")"
+assert_eq "session change: usage so far carried" "100" "$(jq '.coder_usage_carry.output_tokens' "$L4/state.json")"
+assert_eq "session change: transcript reference cleared" "null" "$(jq .transcript_path "$L4/state.json")"
+assert_eq "session change: baseline cleared" "null null" "$(jq -r '"\(.coder_usage_cum) \(.coder_usage_base)"' "$L4/state.json")"
+assert_contains "session change logged" "continued in another session ($SA -> $SB): its usage so far stored, new session starts from nothing" "$(cat "$L4/loop.log")"
+assert_eq "session change: old session's total stored" "100" "$(jq -r '.sessions[0].cum.output_tokens' "$L4/state.json")"
+coder "$L4" 2; verdicts changes_requested; review "$R4" > /dev/null
+assert_eq "session B: round 2 usage measured on B's transcript" "40" "$(jq '.rounds[1].coder.output_tokens' "$L4/state.json")"
+assert_eq "session B: round 1 untouched" "100" "$(jq '.rounds[0].coder.output_tokens' "$L4/state.json")"
+assert_eq "session B: cumulative is B's total" "40" "$(jq '.coder_usage_cum.output_tokens' "$L4/state.json")"
+assert_contains "coder total spans both sessions" "| TOTAL coder | claude-x,claude-y | 14 | 0 | 0 | 140 |" "$(cat "$L4/usage.md")"
+assert_eq "session B: at the cap again" "max_rounds_reached" "$(st "$L4" outcome)"
+# back to A, which did 10 more tokens meanwhile: its earlier 100 must not be recounted
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:03.000Z","message":{"id":"a2","model":"claude-x","usage":{"input_tokens":1,"output_tokens":10}}}' >> "$HOME/.claude/projects/-r2c/$SA.jsonl"
+verdicts approved
+OUT=$(cd "$R4" && bash "$S/continue.sh" --session "$SA" 2>&1); RC=$?
+assert_eq "continue back in session A succeeds" "0" "$RC"
+assert_contains "return to a known session logged" "continued in another session ($SB -> $SA): its usage so far stored, resuming the new session's earlier total" "$(cat "$L4/loop.log")"
+assert_eq "A -> B -> A: A resumes from its stored total" "100" "$(jq '.coder_usage_cum.output_tokens' "$L4/state.json")"
+assert_eq "A -> B -> A: carry is B's total only" "40" "$(jq '.coder_usage_carry.output_tokens' "$L4/state.json")"
+assert_eq "A -> B -> A: both sessions stored once" '["aaaaaaaa-sess-a:100","bbbbbbbb-sess-b:40"]' "$(jq -c '[.sessions[] | "\(.id):\(.cum.output_tokens)"] | sort' "$L4/state.json")"
+coder "$L4" 3; verdicts approved; review "$R4" > /dev/null
+assert_eq "A -> B -> A: round 3 is A's delta only" "10" "$(jq '.rounds[2].coder.output_tokens' "$L4/state.json")"
+assert_eq "A -> B -> A: rounds 100, 40, 10" "[100,40,10]" "$(jq -c '[.rounds[].coder.output_tokens]' "$L4/state.json")"
+assert_contains "A -> B -> A: coder total is 150, not 250" "| TOTAL coder | claude-x,claude-y | 15 | 0 | 0 | 150 |" "$(cat "$L4/usage.md")"
+assert_eq "loop approved after the session changes" "approved" "$(st "$L4" outcome)"
+assert_contains "summary coder total spans all sessions once" "| TOTAL coder | claude-x,claude-y | 15 | 0 | 0 | 150 |" "$(cat "$L4/summary.md")"
+# the same session continuing keeps its baseline: no carry, no reset
+R5=$(new_repo r2d); mkdir -p "$HOME/.claude/projects/-r2d"; SC="cccccccc-sess-c"   # its own id: the transcript glob is per session id
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:01.000Z","message":{"id":"c1","model":"claude-x","usage":{"input_tokens":1,"output_tokens":30}}}' > "$HOME/.claude/projects/-r2d/$SC.jsonl"
+start "$R5" --max-rounds 1 --usage --session "$SC" "t" > /dev/null; L5=$(pointer "$R5"); echo x > "$R5/f"
+jq '.started_at = "2020-01-01T00:00:00Z"' "$L5/state.json" > "$L5/s.tmp" && mv "$L5/s.tmp" "$L5/state.json"
+coder "$L5" 1; verdicts changes_requested; review "$R5" > /dev/null
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:02.000Z","message":{"id":"c2","model":"claude-x","usage":{"input_tokens":1,"output_tokens":5}}}' >> "$HOME/.claude/projects/-r2d/$SC.jsonl"
+verdicts approved; (cd "$R5" && bash "$S/continue.sh" --session "$SC" > /dev/null 2>&1)
+assert_eq "same session: no carry" "null" "$(jq .coder_usage_carry "$L5/state.json")"
+assert_eq "same session: baseline kept" "30" "$(jq '.coder_usage_cum.output_tokens' "$L5/state.json")"
+coder "$L5" 2; verdicts approved; review "$R5" > /dev/null
+assert_eq "same session: round 2 is the delta" "5" "$(jq '.rounds[1].coder.output_tokens' "$L5/state.json")"
+assert_contains "same session: total is the session total" "| TOTAL coder | claude-x | 2 | 0 | 0 | 35 |" "$(cat "$L5/usage.md")"
+rm -rf "$HOME/.claude/projects/-r2c" "$HOME/.claude/projects/-r2d"
+if command -v node > /dev/null 2>&1; then
+  DERIVE="$TMP/derive-ext.js"
+  sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
+  EOUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const mk = ext => RL.deriveLoop({ state: { loop_id: "x", rounds: [], started_at: "2026-01-01T00:00:00Z", extensions: ext }, files: [], task: "t" }).extendedRounds;
+    console.log(mk([{ rounds: 2 }, { rounds: 1 }]) + " " + mk([]) + " " + mk(undefined) + " " + mk("junk"));
+  ' "$DERIVE")
+  assert_eq "deriveLoop: extended rounds summed, 0 when absent or malformed" "3 0 0 0" "$EOUT"
+fi
 
 section "max_rounds=1"
 R=$(new_repo r3)
