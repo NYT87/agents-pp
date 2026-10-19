@@ -111,7 +111,9 @@ while IFS=$'\t' read -r phys d; do
   COUNT=$(( COUNT + 1 ))
 done < <(sort -t "$(printf '\t')" -k1,1 -u -s "$CANDIDATES")
 
-# Configuration, as config.sh reports it, so the page can show and edit it.
+# Configuration, as config.sh reports it, so the page can show and edit it; the
+# default role templates are embedded too, so the agent-roles section can show
+# what each role runs with and which {{placeholders}} a replacement may use.
 (cd "$ROOT" && bash "$RL_SCRIPTS_DIR/config.sh" show --json) > "$WORK/config-show.json" 2>/dev/null || echo 'null' > "$WORK/config-show.json"
 bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/null || echo '{"keys":[],"backends":[]}' > "$WORK/config-keys.json"
 # Every existing per-provider file (any provider), so the page can merge edits
@@ -136,16 +138,19 @@ if [ "$WITH_USER" = "0" ] && [ -z "$SERVE_TOKEN" ]; then
     .files |= map(if (.label | startswith("user ")) then .values = null | .redacted = true else . end)
     | . as $show
     | reduce ($show.sources | to_entries[] | select(.value | (startswith("user ") or startswith("env ")))) as $e
-        (.; .effective |= setpath(($e.key | split(".")); null))
+        (.; .effective |= setpath(($e.key | split(".")); null)
+          | if (.prompt_files // {}) | has($e.key) then .prompt_files[$e.key] = null else . end)
     | .redacted_user_config = true end' "$WORK/config-show.json" > "$WORK/config-show.tmp" && mv "$WORK/config-show.tmp" "$WORK/config-show.json"
   jq -c 'map(select(.scope == "project"))' "$WORK/provider-files.json" > "$WORK/pf.tmp" && mv "$WORK/pf.tmp" "$WORK/provider-files.json"
 fi
 jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" --arg script "$RL_SCRIPTS_DIR/config.sh" --arg token "$SERVE_TOKEN" \
   --slurpfile show "$WORK/config-show.json" --slurpfile keys "$WORK/config-keys.json" --slurpfile pf "$WORK/provider-files.json" \
   --arg home "$HOME" --arg ucfg "$(rl_user_config_dir)/config.json" \
+  --rawfile rtpl "$RL_TEMPLATES_DIR/reviewer-prompt.md" --rawfile ctpl "$RL_TEMPLATES_DIR/coder-brief.md" \
   '{generated_at: $t, root: $root, loops: (sort_by([.state.started_at, .state.loop_id]) | reverse),
     config: {show: $show[0], keys: $keys[0].keys, backends: $keys[0].backends, script: $script,
              provider_files: $pf[0], home: $home, user_shared: $ucfg},
+    templates: {reviewer: $rtpl, coder: $ctpl},
     serve: (if $token == "" then null else {token: $token} end)}' \
   "$LOOPS_FILE" | sed 's|</|<\\/|g' > "$WORK/data.json"
 

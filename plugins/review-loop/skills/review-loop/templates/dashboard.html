@@ -124,6 +124,15 @@
   pre.cmd { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
   .cfg-out { font-size: 12px; white-space: pre-wrap; margin-top: 8px; color: var(--ink-2); }
   .cfg-out.ok { color: var(--good); } .cfg-out.err { color: var(--critical); }
+  .cfg-group { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 4px; }
+  .cfg-grid.one { grid-template-columns: 1fr; margin: 6px 0 0; }
+  .role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin: 8px 0; }
+  .role-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .role-card h4 { margin: 0; font-size: 14px; }
+  .role-status { font-size: 12px; color: var(--ink-2); margin: 4px 0 0; }
+  .role-status .missing { color: var(--critical); font-weight: 600; }
+  details.role-tpl { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+  details.role-tpl pre { max-height: 240px; overflow: auto; font-size: 11px; background: var(--page); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; margin: 6px 0 0; }
   details.cfg-files { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
   details.cfg-files code { font-size: 11px; }
   @media (max-width: 640px) { .task { max-width: 200px; } th.opt, td.opt { display: none; } }
@@ -200,7 +209,7 @@
       <h2>Configuration</h2>
       <div class="hint" id="cfg-hint"></div>
       <div class="cfg-scope" id="cfg-scope"></div>
-      <div class="cfg-grid" id="cfg-grid"></div>
+      <div class="cfg-groups" id="cfg-grid"></div>
       <div class="cfg-actions" id="cfg-actions"></div>
       <pre class="cmd" id="cfg-cmd"></pre>
       <div class="cfg-out" id="cfg-out"></div>
@@ -408,7 +417,44 @@ var RL = (function () {
     if (/^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(h)) return { view: 'loop', id: h };
     return { view: 'home' };
   }
-  return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute };
+  // The agent roles: each runs with a prompt template (the default, or the file
+  // configured as its replacement) plus an optional extra file appended to it.
+  const ROLES = [
+    { role: 'reviewer', title: 'Reviewer', what: 'reviews the diff each round', template: 'prompts.reviewer', extra: 'prompts.reviewer_extra', defaultName: 'reviewer-prompt.md' },
+    { role: 'coder', title: 'Coder', what: 'gets the brief when the loop starts and at each round', template: 'prompts.coder', extra: 'prompts.coder_extra', defaultName: 'coder-brief.md' }
+  ];
+  // Configuration keys in the groups the page shows: the loop, the dashboard,
+  // and the agent roles (rendered as one card per role).
+  function groupKeys(keys) {
+    const g = { loop: [], dashboard: [], roles: [] };
+    for (const k of keys || []) g[k.key.startsWith('prompts.') ? 'roles' : k.key.startsWith('dashboard.') ? 'dashboard' : 'loop'].push(k);
+    return [{ id: 'loop', title: 'Loop', keys: g.loop }, { id: 'dashboard', title: 'Dashboard', keys: g.dashboard }, { id: 'roles', title: 'Agent roles', keys: g.roles }].filter(x => x.keys.length);
+  }
+  // What a role runs with, from the effective configuration and the file facts
+  // config.sh reports (prompt_files). A null effective value is one the page
+  // hides (user or environment source on a shareable page).
+  function roleStatus(def, effective, promptFiles) {
+    const one = (key, kind) => {
+      const value = getPath(effective, key);
+      if (value == null) return { kind, hidden: true, configured: false, value: '', path: null, exists: null, readable: null };
+      if (value === '') return { kind, hidden: false, configured: false, value: '', path: null, exists: null, readable: null };
+      const f = (promptFiles || {})[key] || {};
+      return { kind, hidden: false, configured: true, value: String(value), path: f.path || null,
+        exists: f.exists == null ? null : !!f.exists, readable: f.readable == null ? null : !!f.readable };
+    };
+    return { role: def.role, template: one(def.template, 'template'), extra: one(def.extra, 'extra') };
+  }
+  // The {{PLACEHOLDERS}} a template uses, in order of first appearance.
+  const placeholders = text => [...new Set((text || '').match(/\{\{[A-Z_]+\}\}/g) || [])];
+  // One line for a loop's role: what state.prompts (frozen at start) says it
+  // ran with, or null for loops recorded before prompts were stored.
+  function promptLabel(prompts, role) {
+    if (!prompts || typeof prompts !== 'object') return null;
+    const tpl = prompts[role] || '', extra = prompts[role + '_extra'] || '';
+    return (tpl || 'default') + (extra ? ' + ' + extra : '');
+  }
+  return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute,
+    ROLES, groupKeys, roleStatus, placeholders, promptLabel };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
 </script>
@@ -641,7 +687,7 @@ if (typeof module !== 'undefined') module.exports = RL;
   }
   function cfgRenderRows() {
     const sc = cfgState;
-    $('#cfg-grid').innerHTML = (CFG.keys || []).map(k => {
+    const rowHtml = k => {
       const v = sc.form[k.key] ?? '';
       const removed = sc.remove.has(k.key);
       let input;
@@ -658,7 +704,26 @@ if (typeof module !== 'undefined') module.exports = RL;
       const hidden = (CFG.show.redacted_user_config && /^(user |env )/.test(srcOf(k.key)));
       const tgt = cfgTargetFile().redacted ? ' · target contents hidden' : inTarget ? ` · in target: ${esc(tv === '' ? '(empty)' : tv)}` : ' · not in target';
       return `<div class="cfg-row" data-row="${k.key}"><label title="${esc(k.help)}">${esc(k.key)} <span class="src">· ${esc(srcOf(k.key))}${hidden ? ' (value hidden)' : ''}${tgt}</span></label>${input}<div class="src"><span class="err" data-err="${k.key}"></span>${esc(k.help)} ${tools}</div></div>`;
-    }).join('');
+    };
+    // One card per agent role: what it runs with now, its two keys, and the
+    // default template with the placeholders a replacement may use.
+    const roleCard = def => {
+      const st = RL.roleStatus(def, CFG.show.effective || {}, CFG.show.prompt_files || {});
+      const fileNote = x => x.exists === false ? ' <span class="missing">— file missing: the loop will not start</span>' : x.exists && x.readable === false ? ' <span class="missing">— file unreadable</span>' : '';
+      const tpl = st.template.hidden ? 'template: <i>value hidden</i>' : st.template.configured ? `template: replaced by <b class="mono">${esc(st.template.value)}</b>${fileNote(st.template)}` : `template: default <span class="mono">${esc(def.defaultName)}</span>`;
+      const extra = st.extra.hidden ? 'extra instructions: <i>value hidden</i>' : st.extra.configured ? `extra instructions: <b class="mono">${esc(st.extra.value)}</b>${fileNote(st.extra)}` : 'extra instructions: none';
+      const text = (DATA.templates || {})[def.role] || '';
+      const ph = RL.placeholders(text);
+      return `<div class="role-card" data-role="${def.role}"><h4>${esc(def.title)}</h4><div class="role-status">${esc(def.what)} · ${tpl} · ${extra}</div>
+        <div class="cfg-grid one">${(CFG.keys || []).filter(k => k.key === def.template || k.key === def.extra).map(rowHtml).join('')}</div>
+        ${text ? `<details class="role-tpl"><summary>default template <span class="mono">${esc(def.defaultName)}</span> · placeholders: ${ph.map(x => `<span class="mono">${esc(x)}</span>`).join(', ') || 'none'}</summary><pre>${esc(text)}</pre></details>` : ''}</div>`;
+    };
+    // Any prompts.* key no role card covers still gets an ordinary row.
+    const roleKeys = new Set(RL.ROLES.flatMap(d => [d.template, d.extra]));
+    $('#cfg-grid').innerHTML = RL.groupKeys(CFG.keys || []).map(g => `<h3 class="cfg-group">${esc(g.title)}</h3>`
+      + (g.id === 'roles'
+        ? `<div class="role-cards">${RL.ROLES.map(roleCard).join('')}</div><div class="cfg-grid">${g.keys.filter(k => !roleKeys.has(k.key)).map(rowHtml).join('')}</div>`
+        : `<div class="cfg-grid">${g.keys.map(rowHtml).join('')}</div>`)).join('');
     $('#cfg-grid').querySelectorAll('[data-key]').forEach(el => {
       const h = () => { sc.form[el.dataset.key] = el.type === 'checkbox' ? String(el.checked) : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; const fb = $(`[data-force="${el.dataset.key}"]`); if (fb) fb.style.display = sc.form[el.dataset.key] === sc.initial[el.dataset.key] ? '' : 'none'; cfgUpdate(); };
       el.oninput = h; el.onchange = h;
@@ -773,7 +838,8 @@ if (typeof module !== 'undefined') module.exports = RL;
         <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b></span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
         ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
         <span>coder time <b>${fmtCoderTime(l, true)}</b></span><span>review time <b>${fmtDur(l.reviewTime)}</b></span>
-        ${l.usage ? `<span>cost <b>${fmtCost(l.cost)}</b></span>` : ''}<span>dir <b class="mono">${esc(l.dir)}</b></span></div>
+        ${l.usage ? `<span>cost <b>${fmtCost(l.cost)}</b></span>` : ''}<span>dir <b class="mono">${esc(l.dir)}</b></span>
+        ${l.st.prompts ? `<span>reviewer prompt <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'reviewer'))}</b></span><span>coder brief <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'coder'))}</b></span>` : ''}</div>
       ${roundsHtml || '<div class="empty">No rounds yet.</div>'}
       ${l.summary ? `<div class="round"><h3>Summary</h3><div class="doc"><div class="md">${md(l.summary)}</div></div></div>` : ''}
     </div>`;

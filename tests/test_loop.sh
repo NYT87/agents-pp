@@ -1498,6 +1498,56 @@ rm -f "$HOME/.config/review-loop/config.json"
 OUT=$(start "$R" --max-rounds 3 "task"); L=$(pointer "$R")
 assert_contains "start lists the prompt sources" "prompts:    reviewer default (+ docs/reviewer.md), coder default (+ docs/coder.md)" "$OUT"
 assert_file "coder brief written" "$L/coder-brief.md"
+# the agent roles on the dashboard: config.sh reports each role's prompt files,
+# the page embeds them with the default templates, and hides user-sourced ones
+J=$(cd "$R" && bash "$C" show --json)
+assert_eq "show --json: a configured extra resolves to an existing file" "true" "$(jq '.prompt_files["prompts.coder_extra"].exists' <<< "$J")"
+assert_eq "show --json: the resolved path is absolute" "$R/docs/coder.md" "$(jq -r '.prompt_files["prompts.coder_extra"].path' <<< "$J")"
+assert_eq "show --json: an unset prompt key has no file" "null" "$(jq '.prompt_files["prompts.coder"].exists' <<< "$J")"
+assert_eq "show --json: every prompts key is listed" "4" "$(jq '.prompt_files | length' <<< "$J")"
+(cd "$R" && bash "$C" set prompts.coder=docs/nope.md > /dev/null 2>&1)
+assert_eq "show --json: a missing replacement is reported" "false" "$(cd "$R" && bash "$C" show --json | jq '.prompt_files["prompts.coder"].exists')"
+(cd "$R" && bash "$C" unset prompts.coder > /dev/null)
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "dashboard embeds the roles' prompt files" "true" "$(jq '.config.show.prompt_files["prompts.reviewer_extra"].exists' <<< "$D")"
+assert_contains "dashboard embeds the default reviewer template" "{{REVIEW_FORMAT}}" "$(jq -r .templates.reviewer <<< "$D")"
+assert_contains "dashboard embeds the default coder brief" "{{LOOP_DIR}}" "$(jq -r .templates.coder <<< "$D")"
+assert_contains "configuration page has the grouped container" 'class="cfg-groups" id="cfg-grid"' "$(cat "$R/.review-loop/dashboard.html")"
+mkdir -p "$HOME/.config/review-loop"; echo '{"prompts": {"coder": "SECRET-DIR/brief.md"}}' > "$HOME/.config/review-loop/config.json"
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "static page hides a user-sourced prompt file" "null" "$(jq '.config.show.prompt_files["prompts.coder"]' <<< "$D")"
+assert_eq "static page has no user-sourced prompt path" "0" "$(grep -c 'SECRET-DIR' "$R/.review-loop/dashboard.html")"
+assert_eq "static page keeps project-sourced prompt files" "true" "$(jq '.config.show.prompt_files["prompts.coder_extra"].exists' <<< "$D")"
+(cd "$R" && bash "$S/dashboard.sh" --with-user-config > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "--with-user-config shows the user-sourced prompt file" "false" "$(jq '.config.show.prompt_files["prompts.coder"].exists' <<< "$D")"
+rm -f "$HOME/.config/review-loop/config.json"
+if command -v node > /dev/null 2>&1; then
+  DERIVE="$TMP/derive-roles.js"
+  sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
+  NOUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const keys = JSON.parse(process.argv[2]).keys;
+    console.log(RL.groupKeys(keys).map(g => g.id + ":" + g.keys.length).join(" "));
+    const eff = { prompts: { reviewer: "", reviewer_extra: "docs/r.md", coder: "docs/c.md", coder_extra: "" } };
+    const pf = { "prompts.reviewer_extra": { value: "docs/r.md", path: "/p/docs/r.md", exists: true, readable: true }, "prompts.coder": { value: "docs/c.md", path: "/p/docs/c.md", exists: false, readable: false } };
+    const r = RL.roleStatus(RL.ROLES[0], eff, pf), c = RL.roleStatus(RL.ROLES[1], eff, pf);
+    console.log([r.template.configured, r.extra.configured, r.extra.exists, c.template.configured, c.template.exists, c.extra.configured].join(" "));
+    console.log(RL.roleStatus(RL.ROLES[0], { prompts: { reviewer: null, reviewer_extra: "" } }, {}).template.hidden);
+    console.log(RL.placeholders("a {{TASK}} b {{ROUND}} {{TASK}} {{not}}").join(","));
+    const pr = { reviewer: "", reviewer_extra: "docs/r.md", coder: "docs/c.md", coder_extra: "" };
+    console.log(RL.promptLabel(pr, "reviewer") + " | " + RL.promptLabel(pr, "coder") + " | " + RL.promptLabel(null, "coder"));
+  ' "$DERIVE" "$(bash "$C" keys --json)")
+  assert_eq "groupKeys: loop, dashboard and roles groups" "loop:5 dashboard:4 roles:4" "$(sed -n 1p <<< "$NOUT")"
+  assert_eq "roleStatus: configured files and their existence" "false true true true false false" "$(sed -n 2p <<< "$NOUT")"
+  assert_eq "roleStatus: a hidden value is flagged" "true" "$(sed -n 3p <<< "$NOUT")"
+  assert_eq "placeholders: unique, uppercase, in order" "{{TASK}},{{ROUND}}" "$(sed -n 4p <<< "$NOUT")"
+  assert_eq "promptLabel: default, replacement, extra and missing" "default + docs/r.md | docs/c.md | null" "$(sed -n 5p <<< "$NOUT")"
+else
+  echo "  skip  node not installed: role helpers not tested"
+fi
 assert_contains "brief has the task" "task" "$(cat "$L/coder-brief.md")"
 assert_contains "brief has the loop dir" "$L/round-NN-coder.md" "$(cat "$L/coder-brief.md")"
 assert_contains "brief has the extra section" "## Additional instructions for the coder (from $R/docs/coder.md)" "$(cat "$L/coder-brief.md")"

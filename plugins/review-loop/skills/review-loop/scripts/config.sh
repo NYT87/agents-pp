@@ -254,14 +254,28 @@ cmd_show() {
     done < <(rl_config_files)
     local sources='{}'
     for k in $KEYS; do sources=$(jq -c --arg k "$k" --arg v "$(rl_config_source "$k")" '. + {($k): $v}' <<< "$sources"); done
-    jq -n --argjson e "$eff" --argjson d "$def" --argjson f "$files" --arg prov "$PROVIDER" --argjson src "$sources" \
+    # The agent roles' prompt files, resolved like the loop resolves them, with
+    # whether each exists and can be read (a missing one blocks start.sh).
+    local pfiles='{}' v p
+    for k in $KEYS; do
+      case "$k" in prompts.*) ;; *) continue ;; esac
+      v=$(jq -r --arg k "${k#prompts.}" '.prompts[$k] // ""' <<< "$eff")
+      if [ -n "$v" ]; then
+        p=$(rl_prompt_path "$ROOT" "$v")
+        pfiles=$(jq -c --arg k "$k" --arg v "$v" --arg p "$p" --argjson e "$([ -f "$p" ] && echo true || echo false)" \
+          --argjson r "$([ -r "$p" ] && echo true || echo false)" '. + {($k): {value: $v, path: $p, exists: $e, readable: $r}}' <<< "$pfiles")
+      else
+        pfiles=$(jq -c --arg k "$k" '. + {($k): {value: "", path: null, exists: null, readable: null}}' <<< "$pfiles")
+      fi
+    done
+    jq -n --argjson e "$eff" --argjson d "$def" --argjson f "$files" --arg prov "$PROVIDER" --argjson src "$sources" --argjson pf "$pfiles" \
       --arg scope "$SCOPE" --arg mode "$MODE" --arg target "$TARGET" --argjson section "$SECTION" \
       --argjson te "$([ -f "$TARGET" ] && echo true || echo false)" \
       --argjson se "$(NEW=$(read_file "$TARGET"); if [ "$SECTION" = "[]" ]; then [ -f "$TARGET" ] && echo true || echo false; else jq -c --argjson s "$SECTION" 'getpath($s) != null' <<< "$NEW"; fi)" \
       --arg note "$AUTO_NOTE" \
       '{provider: (if $prov == "" then null else $prov end), scope: $scope, mode: $mode, target: $target,
         section: $section, target_exists: $te, section_exists: $se, note: (if $note == "" then null else $note end),
-        effective: $e, defaults: $d, sources: $src, files: $f}'
+        effective: $e, defaults: $d, sources: $src, files: $f, prompt_files: $pf}'
     return
   fi
   echo "review-loop configuration"
