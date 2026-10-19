@@ -20,6 +20,12 @@ Options:
   --no-usage         disable usage recording for this loop
   --session ID       Claude Code session id of the coder (enables coder usage tracking
                      without the Stop hook; the skill passes it automatically)
+  --reviewer-prompt FILE   replace the reviewer prompt template for this loop
+  --reviewer-extra FILE    append FILE to the reviewer prompt
+  --coder-prompt FILE      replace the coder brief template for this loop
+  --coder-extra FILE       append FILE to the coder brief
+                     (config keys prompts.reviewer, prompts.reviewer_extra, prompts.coder,
+                     prompts.coder_extra; paths are absolute, ~/..., or project-relative)
   --force            cancel an already active loop first
   --git-exclude      add the loop dir and pointer to .git/info/exclude
   -h, --help         show this help
@@ -33,6 +39,7 @@ HELP
 }
 
 FLAG_BACKEND="" FLAG_MODEL="" FLAG_MAX="" FLAG_DIR="" FLAG_SESSION="" FLAG_USAGE="" FORCE=0 GIT_EXCLUDE=0
+FLAG_P_REVIEWER="" FLAG_P_REVIEWER_EXTRA="" FLAG_P_CODER="" FLAG_P_CODER_EXTRA=""
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -46,6 +53,14 @@ while [ $# -gt 0 ]; do
     --dir=*) FLAG_DIR="${1#*=}"; shift ;;
     --session) FLAG_SESSION="${2:-}"; shift 2 ;;
     --session=*) FLAG_SESSION="${1#*=}"; shift ;;
+    --reviewer-prompt) FLAG_P_REVIEWER="${2:-}"; shift 2 ;;
+    --reviewer-prompt=*) FLAG_P_REVIEWER="${1#*=}"; shift ;;
+    --reviewer-extra) FLAG_P_REVIEWER_EXTRA="${2:-}"; shift 2 ;;
+    --reviewer-extra=*) FLAG_P_REVIEWER_EXTRA="${1#*=}"; shift ;;
+    --coder-prompt) FLAG_P_CODER="${2:-}"; shift 2 ;;
+    --coder-prompt=*) FLAG_P_CODER="${1#*=}"; shift ;;
+    --coder-extra) FLAG_P_CODER_EXTRA="${2:-}"; shift 2 ;;
+    --coder-extra=*) FLAG_P_CODER_EXTRA="${1#*=}"; shift ;;
     --usage) FLAG_USAGE="true"; shift ;;
     --no-usage) FLAG_USAGE="false"; shift ;;
     --force) FORCE=1; shift ;;
@@ -79,12 +94,25 @@ CFG=$(jq -c --arg be "$FLAG_BACKEND" --arg model "$FLAG_MODEL" --arg mr "$FLAG_M
     + (if $mr != "" then {max_rounds: ($mr | tonumber)} else {} end)
     + (if $dir != "" then {dir: $dir} else {} end)
     + (if $usage != "" then {usage: ($usage == "true")} else {} end)' <<< "$CFG")
+CFG=$(jq -c --arg r "$FLAG_P_REVIEWER" --arg re "$FLAG_P_REVIEWER_EXTRA" --arg c "$FLAG_P_CODER" --arg ce "$FLAG_P_CODER_EXTRA" '
+  .prompts = ((.prompts // {})
+    + (if $r != "" then {reviewer: $r} else {} end)
+    + (if $re != "" then {reviewer_extra: $re} else {} end)
+    + (if $c != "" then {coder: $c} else {} end)
+    + (if $ce != "" then {coder_extra: $ce} else {} end))' <<< "$CFG")
 
 BACKEND=$(jq -r .backend <<< "$CFG")
 MODEL=$(jq -r .model <<< "$CFG")
 MAX_ROUNDS=$(jq -r .max_rounds <<< "$CFG")
 DIR=$(jq -r .dir <<< "$CFG")
 USAGE=$(jq -r '.usage == true' <<< "$CFG")
+PROMPTS=$(jq -c '.prompts // {} | {reviewer: (.reviewer // ""), reviewer_extra: (.reviewer_extra // ""), coder: (.coder // ""), coder_extra: (.coder_extra // "")}' <<< "$CFG")
+# Prompt files must exist before anything is created or cancelled.
+for role in reviewer coder; do
+  for suffix in "" _extra; do
+    rl_prompt_file "$ROOT" "$(jq -r --arg k "$role$suffix" '.[$k]' <<< "$PROMPTS")" "$role" "$suffix" > /dev/null
+  done
+done
 
 printf '%s' "$MAX_ROUNDS" | grep -qE '^[1-9][0-9]*$' || rl_die "max_rounds must be a positive integer (got '$MAX_ROUNDS')"
 printf '%s' "$BACKEND" | grep -qE '^[a-z0-9_-]+$' || rl_die "invalid backend name '$BACKEND'"
@@ -120,13 +148,17 @@ printf '%s\n' "$TASK" > "$LOOP_DIR/task.md"
 
 jq -n \
   --arg id "$LOOP_ID" --arg be "$BACKEND" --arg model "$MODEL" --argjson mr "$MAX_ROUNDS" \
-  --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" \
+  --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" --argjson prompts "$PROMPTS" \
   '{loop_id: $id, active: true, phase: "coding", round: 1, max_rounds: $mr,
-    backend: $be, model: $model, base_ref: $base, dir: $dir, root: $root, usage: $usage,
+    backend: $be, model: $model, base_ref: $base, dir: $dir, root: $root, usage: $usage, prompts: $prompts,
     session_id: (if $sid == "" then null else $sid end), started_at: $t, retries: 0, verdict: null, rounds: [],
     round_started_at: $t, round_started_epoch: $e, paused_s: 0, failed_review_s: 0}' > "$LOOP_DIR/state.json"
 
-# Only now, with the new loop fully written, retire the old one (--force).
+# The coder brief (re-rendered by review.sh at the start of every round).
+BRIEF=$(rl_coder_brief "$LOOP_DIR") || exit 1
+printf '%s\n' "$BRIEF" > "$LOOP_DIR/coder-brief.md"
+
+# Only now, with the new loop fully written (brief included), retire the old one (--force).
 if [ "$EXISTING" = "1" ]; then
   rl_finalize "$RL_LOOP_DIR" "$RL_ROOT" "cancelled" "cancelled" "Cancelled by start.sh --force."
   echo "Cancelled previous loop $RL_LOOP_ID"
@@ -155,11 +187,12 @@ Review loop started
   usage:      $([ "$USAGE" = "true" ] && echo "recorded in usage.md" || echo "off (enable with --usage)")
   task:       $LOOP_DIR/task.md
 
-Protocol
-  1. Implement the task completely.
-  2. Write $LOOP_DIR/round-01-coder.md (template: $RL_TEMPLATES_DIR/coder-summary.md).
-  3. Run: bash $RL_SCRIPTS_DIR/review.sh   (use a long timeout, reviews take minutes)
-  4. Follow the instructions review.sh prints; repeat until the verdict is "approved".
+  prompts:    reviewer $(jq -r '.reviewer | if . == "" then "default" else . end' <<< "$PROMPTS") (+ $(jq -r '.reviewer_extra | if . == "" then "no extra" else . end' <<< "$PROMPTS")), coder $(jq -r '.coder | if . == "" then "default" else . end' <<< "$PROMPTS") (+ $(jq -r '.coder_extra | if . == "" then "no extra" else . end' <<< "$PROMPTS"))
+  brief:      $LOOP_DIR/coder-brief.md
 
+Your brief (follow it; it may carry project-specific instructions):
+------------------------------------------------------------------
+$BRIEF
+------------------------------------------------------------------
 Use /review-status to inspect and /review-cancel to abort.
 OUT

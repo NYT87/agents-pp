@@ -42,6 +42,8 @@ propose a fix. Mark a comment `blocking: yes` only when it must be fixed before
 the work is acceptable. Do not block on style preferences. If the work is good,
 say so briefly and approve; do not invent findings.
 
+{{EXTRA}}
+
 ## Required output format
 
 {{REVIEW_FORMAT}}

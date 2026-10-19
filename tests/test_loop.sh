@@ -619,7 +619,7 @@ echo '{}' > "$R/.claude/review-loop.json"
 section "config command"
 C="$S/config.sh"
 R=$(new_repo r24); rm -f "$HOME/.claude/review-loop.json"
-assert_eq "keys lists every key" "9" "$(bash "$C" keys | grep -c .)"
+assert_eq "keys lists every key" "13" "$(bash "$C" keys | grep -c .)"
 OUT=$(cd "$R" && bash "$C" show)
 assert_contains "show: missing project file" "review-loop.json (missing)" "$OUT"
 assert_contains "show: backend row shows env value and default" "codex" "$(printf '%s' "$OUT" | grep '^  backend ' | grep 'fake')"
@@ -753,7 +753,7 @@ assert_contains "gitignore dir=.: idempotent with the pattern" "already covers" 
 (cd "$R" && bash "$C" unset dir dashboard.dirs > /dev/null)
 
 R=$(new_repo r25); rm -f "$HOME/.claude/review-loop.json"
-OUT=$(cd "$R" && printf 'nope\nclaude\n\nabc\n4\n\nyes\n\n\nno\n\ny\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf 'nope\nclaude\n\nabc\n4\n\nyes\n\n\nno\n\n\n\n\n\ny\n' | bash "$C" init 2>&1)
 F="$R/.review-loop.json"
 assert_contains "init: creating message" "Creating $F" "$OUT"
 assert_contains "init: shows current value as default" "[fake]:" "$OUT"
@@ -769,7 +769,7 @@ assert_contains "init: gitignore offered last" "Add these to .gitignore?" "$OUT"
 assert_contains "init: gitignore written on y" "/.review-loop/" "$(cat "$R/.gitignore")"
 assert_contains "init: gitignore includes default dashboard file" "/.review-loop/dashboard.html" "$(cat "$R/.gitignore")"
 (cd "$R" && bash "$C" set --user model=opus > /dev/null)
-OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: updating message" "Updating $F" "$OUT"
 assert_contains "init: shows inherited value" "[opus]:" "$OUT"
 assert_eq "init: Enter keeps inherited value out of the file" "null" "$(jq .model "$F")"
@@ -777,13 +777,13 @@ assert_eq "init: changed value written" "9" "$(jq .max_rounds "$F")"
 assert_eq "init: untouched value kept" "claude" "$(jq -r .backend "$F")"
 assert_contains "init: gitignore already covered" "already covers" "$OUT"
 (cd "$R" && bash "$C" set model=opus dashboard.out=docs/d.html dashboard.dirs=a,b > /dev/null)
-OUT=$(cd "$R" && printf '\n-\n\n\n\n-\n-\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n-\n\n\n\n-\n-\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: clear hint shown for clearable keys" "(type - to clear)" "$OUT"
 assert_eq "init: - clears model" '""' "$(jq -c .model "$F")"
 assert_eq "init: - clears dashboard.dirs to []" "[]" "$(jq -c .dashboard.dirs "$F")"
 assert_eq "init: - clears dashboard.out" '""' "$(jq -c .dashboard.out "$F")"
 assert_eq "init: cleared model overrides the user file" "" "$(cd "$R" && bash "$C" show --json | jq -r .effective.model)"
-OUT=$(cd "$R" && printf -- '-\n\n-\n-\n5\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf -- '-\n\n-\n-\n5\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: - is invalid for backend" "unknown backend '-'" "$OUT"
 assert_contains "init: - is invalid for max_rounds" "positive integer (got '-')" "$OUT"
 assert_eq "init: retry after - works" "5" "$(jq .max_rounds "$F")"
@@ -940,7 +940,7 @@ assert_contains "show rejects stray arguments" "unexpected argument 'extra'" "$(
 assert_contains "create rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" create --project stray 2>&1 || true)"
 assert_contains "gitignore rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" gitignore now 2>&1 || true)"
 assert_contains "bad provider name rejected" "invalid provider name" "$(cd "$R" && bash "$C" set --provider='bad name' max_rounds=1 2>&1 || true)"
-OUT=$(cd "$R" && printf '\n\n4\n\n\n\n\n\n\nn\n' | bash "$C" init --provider codex 2>&1)
+OUT=$(cd "$R" && printf '\n\n4\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --provider codex 2>&1)
 assert_contains "init --provider writes into the section" "Wrote $R/.review-loop.json (providers.codex)" "$OUT"
 assert_eq "init --provider value in section" '4' "$(jq .providers.codex.max_rounds "$R/.review-loop.json")"
 rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json" "$HOME/.codex"
@@ -964,7 +964,7 @@ assert_not_contains "unmasked key gets no warning" "warning:" "$OUT"
 OUT=$(cd "$R" && bash "$C" set max_rounds=7 2>&1)
 assert_contains "both files present: default is the shared file" "Updated $R/.review-loop.json" "$OUT"
 assert_contains "both files present: masked write warns" "effective value is 4, set by project claude" "$OUT"
-OUT=$(cd "$R" && printf '\n\n8\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n\n8\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init warns about masked values too" "warning: max_rounds=8" "$OUT"
 rm -f "$R/.review-loop.json"
 mkdir -p "$HOME/.claude"; echo '{"model": "legacy"}' > "$HOME/.claude/review-loop.json"
@@ -981,7 +981,7 @@ rm -f "$HOME/.config/review-loop/config.json" "$HOME/.claude/review-loop.json"
 mkdir -p "$R/.claude"; echo '{"max_rounds": 2, "model": "m"}' > "$R/.claude/review-loop.json"
 OUT=$(cd "$R" && bash "$C" init --project --yes 2>&1)
 assert_not_contains "init --yes writes nothing, so no masking warnings" "warning:" "$OUT"
-OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\nn\n' | bash "$C" init --project 2>&1)
+OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --project 2>&1)
 assert_contains "init warns for the key it wrote" "warning: max_rounds=9" "$OUT"
 assert_eq "init warns only once" "1" "$(printf '%s\n' "$OUT" | grep -c '^warning:')"
 assert_not_contains "init does not warn for keys it did not write" "warning: model=" "$OUT"
@@ -1196,9 +1196,9 @@ fi
 
 section "dashboard configuration panel"
 R=$(new_repo r36); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
-assert_eq "keys --json lists every key" "9" "$(bash "$C" keys --json | jq '.keys | length')"
+assert_eq "keys --json lists every key" "13" "$(bash "$C" keys --json | jq '.keys | length')"
 assert_eq "keys --json excludes the fake backend" '["claude","codex"]' "$(bash "$C" keys --json | jq -c .backends)"
-assert_eq "keys --json marks clearable keys" "3" "$(bash "$C" keys --json | jq '[.keys[] | select(.clearable)] | length')"
+assert_eq "keys --json marks clearable keys" "7" "$(bash "$C" keys --json | jq '[.keys[] | select(.clearable)] | length')"
 (cd "$R" && bash "$C" set max_rounds=3 > /dev/null)
 J=$(cd "$R" && bash "$C" show --json)
 assert_eq "show --json carries sources" '"project shared"' "$(jq .sources.max_rounds <<< "$J")"
@@ -1206,7 +1206,7 @@ assert_eq "show --json source for env" '"env REVIEW_LOOP_BACKEND"' "$(jq .source
 assert_eq "show --json source default" '"default"' "$(jq .sources.model <<< "$J")"
 (cd "$R" && bash "$S/dashboard.sh" > /dev/null)
 D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
-assert_eq "dashboard embeds the config keys" "9" "$(jq '.config.keys | length' <<< "$D")"
+assert_eq "dashboard embeds the config keys" "13" "$(jq '.config.keys | length' <<< "$D")"
 assert_eq "dashboard embeds effective values" "3" "$(jq .config.show.effective.max_rounds <<< "$D")"
 assert_eq "dashboard embeds sources" '"project shared"' "$(jq .config.show.sources.max_rounds <<< "$D")"
 CABS="$(cd "$(dirname "$C")" && pwd)/config.sh"
@@ -1487,6 +1487,313 @@ assert_contains "key-shaped word after --provider is explained" "note: '--provid
 OUT=$(cd "$R" && bash "$C" show --provider-file keys 2>&1 || true)
 assert_contains "command-shaped word after --provider-file is explained" "'keys' is a command" "$OUT"
 rm -f "$R/.review-loop.json" "$R/.claude/review-loop.json"
+
+section "role prompts"
+R=$(new_repo r38); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
+mkdir -p "$R/docs"; printf 'Always run make test.\n' > "$R/docs/coder.md"; printf 'Focus on security.\n' > "$R/docs/reviewer.md"
+OUT=$(cd "$R" && bash "$C" set prompts.coder_extra=docs/coder.md prompts.reviewer_extra=docs/reviewer.md 2>&1)
+assert_not_contains "set: existing prompt files give no note" "does not exist yet" "$OUT"
+assert_contains "set: a missing prompt file is noted" "does not exist yet" "$(cd "$R" && bash "$C" set --user prompts.coder=nope.md 2>&1)"
+rm -f "$HOME/.config/review-loop/config.json"
+OUT=$(start "$R" --max-rounds 3 "task"); L=$(pointer "$R")
+assert_contains "start lists the prompt sources" "prompts:    reviewer default (+ docs/reviewer.md), coder default (+ docs/coder.md)" "$OUT"
+assert_file "coder brief written" "$L/coder-brief.md"
+assert_contains "brief has the task" "task" "$(cat "$L/coder-brief.md")"
+assert_contains "brief has the loop dir" "$L/round-NN-coder.md" "$(cat "$L/coder-brief.md")"
+assert_contains "brief has the extra section" "## Additional instructions for the coder (from $R/docs/coder.md)" "$(cat "$L/coder-brief.md")"
+assert_contains "brief carries the extra text" "Always run make test." "$(cat "$L/coder-brief.md")"
+assert_contains "start prints the brief" "Always run make test." "$OUT"
+assert_not_contains "brief has no unrendered placeholder" "{{" "$(cat "$L/coder-brief.md")"
+assert_eq "prompts frozen in state" '{"reviewer":"","reviewer_extra":"docs/reviewer.md","coder":"","coder_extra":"docs/coder.md"}' "$(jq -c .prompts "$L/state.json")"
+assert_contains "status shows prompt sources" "prompts:     reviewer default (+ docs/reviewer.md), coder default (+ docs/coder.md)" "$(cd "$R" && bash "$S/status.sh")"
+echo x > "$R/f"
+assert_contains "stop hook points at the brief" "Your brief, including any project-specific instructions: $L/coder-brief.md" "$(reason "$(hook "$R" s1)")"
+coder "$L" 1; verdicts changes_requested approved; review "$R" > /dev/null
+assert_contains "reviewer prompt has the extra section" "## Additional instructions for the reviewer (from $R/docs/reviewer.md)" "$(cat "$L/round-01-prompt.md")"
+assert_contains "reviewer prompt carries the extra text" "Focus on security." "$(cat "$L/round-01-prompt.md")"
+assert_contains "reviewer prompt keeps the required format" "VERDICT: approved" "$(cat "$L/round-01-prompt.md")"
+assert_not_contains "reviewer prompt has no unrendered placeholder" "{{" "$(cat "$L/round-01-prompt.md")"
+printf 'Focus on security.\nAnd on tests.\n' > "$R/docs/reviewer.md"
+coder "$L" 2; review "$R" > /dev/null
+assert_contains "extra file is re-read each round" "And on tests." "$(cat "$L/round-02-prompt.md")"
+# replacement templates with placeholders, via flags, overriding config
+printf 'REVIEW {{TASK}} round {{ROUND}}/{{MAX_ROUNDS}} backend {{BACKEND}} root {{ROOT}}\n{{CODER_SUMMARY}}\n{{PREVIOUS_REVIEWS}}\n{{DIFF_INSTRUCTIONS}}\n{{EXTRA}}\n{{REVIEW_FORMAT}}\n' > "$R/docs/rev-tpl.md"
+printf 'BRIEF {{LOOP_ID}} {{TASK}} {{LOOP_DIR}} {{SCRIPTS}} {{TEMPLATES}} {{BACKEND}} {{MAX_ROUNDS}} {{ROOT}}\n{{EXTRA}}\n' > "$R/docs/brief-tpl.md"
+printf 'Be brief.\n' > "$HOME/rev-extra.md"
+OUT=$(start "$R" --max-rounds 2 --reviewer-prompt docs/rev-tpl.md --coder-prompt "$R/docs/brief-tpl.md" --reviewer-extra "~/rev-extra.md" --coder-extra= "other task"); L=$(pointer "$R")
+assert_contains "flags override config in the summary" "prompts:    reviewer docs/rev-tpl.md (+ ~/rev-extra.md), coder $R/docs/brief-tpl.md (+ docs/coder.md)" "$OUT"
+B=$(cat "$L/coder-brief.md")
+assert_contains "replacement brief rendered" "BRIEF $(basename "$L") other task $L $(cd "$S" && pwd) $(cd "$S/../templates" && pwd) fake 2 $R" "$B"
+assert_contains "replacement brief still gets the configured extra" "Always run make test." "$B"
+echo y > "$R/g"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
+P=$(cat "$L/round-01-prompt.md")
+assert_contains "replacement reviewer template rendered" "REVIEW other task round 1/2 backend fake root $R" "$P"
+assert_contains "tilde path expanded for the extra" "## Additional instructions for the reviewer (from $HOME/rev-extra.md)" "$P"
+assert_contains "replacement reviewer template keeps the format" "VERDICT: approved" "$P"
+assert_not_contains "replacement templates leave no placeholder" "{{" "$P$B"
+rm -f "$HOME/rev-extra.md"
+# coder instructions edited mid-loop reach the next round's brief
+R2=$(new_repo r38b); mkdir -p "$R2/docs"; printf 'Old coder rule.\n' > "$R2/docs/coder.md"
+(cd "$R2" && bash "$C" set prompts.coder_extra=docs/coder.md > /dev/null)
+start "$R2" --max-rounds 3 "task" > /dev/null; L2=$(pointer "$R2")
+assert_contains "round 1 brief has the old rule" "Old coder rule." "$(cat "$L2/coder-brief.md")"
+printf 'New coder rule.\n' > "$R2/docs/coder.md"; echo y > "$R2/g"; coder "$L2" 1; verdicts changes_requested
+OUT=$(review "$R2")
+B2=$(cat "$L2/coder-brief.md")
+assert_contains "round 2 brief has the new rule" "New coder rule." "$B2"
+assert_not_contains "round 2 brief dropped the old rule" "Old coder rule." "$B2"
+assert_contains "advance output points at the regenerated brief" "$L2/coder-brief.md" "$OUT"
+assert_eq "still on round 2" "2" "$(st "$L2" round)"
+# a coder prompt file that went missing is only needed for the NEXT round: it
+# fails the advance (review kept, round not advanced), never the review itself
+rm "$R2/docs/coder.md"; echo z > "$R2/h"; coder "$L2" 2; verdicts changes_requested
+OUT=$(review "$R2" 2>&1); RC=$?
+assert_eq "missing coder extra fails the advance" "1" "$RC"
+assert_contains "the advance failure names the key" "prompts.coder_extra points to a missing file" "$OUT"
+assert_file "the review is kept when the advance fails" "$L2/round-02-review.md"
+assert_eq "round not advanced" "2" "$(st "$L2" round)"
+assert_eq "loop still active after a failed advance" "true" "$(st "$L2" active)"
+assert_contains "failed advance logged" "coder brief for round 3 could not be built; round 2 not advanced" "$(cat "$L2/loop.log")"
+assert_contains "brief untouched by the failed advance" "New coder rule." "$(cat "$L2/coder-brief.md")"
+# the retry resumes from the installed review: the reviewer is NOT run again,
+# so a queued "approved" cannot replace the pending changes_requested
+printf 'Restored coder rule.\n' > "$R2/docs/coder.md"; verdicts approved
+OUT=$(review "$R2" 2>&1); RC=$?
+assert_eq "retry after a failed advance succeeds" "0" "$RC"
+assert_contains "retry says it resumes" "a review is already installed (verdict: changes_requested); resuming" "$OUT"
+assert_contains "retry reports the pending verdict" "CHANGES REQUESTED in round 2 of 3" "$OUT"
+assert_eq "retry did not run the backend" "approved" "$(cat "$REVIEW_LOOP_FAKE_FILE")"
+assert_eq "advance succeeds once the file is back" "3" "$(st "$L2" round)"
+assert_eq "resumed verdict recorded" "changes_requested" "$(st "$L2" verdict)"
+assert_eq "resumed round recorded once" "1" "$(jq '[.rounds[] | select(.round == 2)] | length' "$L2/state.json")"
+assert_contains "resume logged" "round 2 resumed from the installed review (verdict=changes_requested blocking=2)" "$(cat "$L2/loop.log")"
+assert_contains "round 3 brief has the restored rule" "Restored coder rule." "$(cat "$L2/coder-brief.md")"
+rm "$R2/docs/coder.md"; coder "$L2" 3; verdicts approved
+OUT=$(review "$R2" 2>&1); RC=$?
+assert_eq "missing coder extra does not block approval" "0" "$RC"
+assert_contains "approved with the coder extra missing" "APPROVED in round 3" "$OUT"
+assert_file "approval review installed with the coder extra missing" "$L2/round-03-review.md"
+assert_eq "approved loop finalized" "approved" "$(st "$L2" outcome)"
+# ... nor the final round at the cap
+R3=$(new_repo r38c); mkdir -p "$R3/docs"; printf 'Rule.\n' > "$R3/docs/coder.md"
+(cd "$R3" && bash "$C" set prompts.coder_extra=docs/coder.md > /dev/null)
+start "$R3" --max-rounds 1 "task" > /dev/null; L3=$(pointer "$R3")
+rm "$R3/docs/coder.md"; echo y > "$R3/g"; coder "$L3" 1; verdicts changes_requested
+OUT=$(review "$R3" 2>&1); RC=$?
+assert_eq "missing coder extra does not block the final round" "0" "$RC"
+assert_contains "final round reported at the cap" "maximum of 1 round(s) is reached" "$OUT"
+assert_eq "outcome max_rounds_reached with the coder extra missing" "max_rounds_reached" "$(st "$L3" outcome)"
+# a brief that cannot be WRITTEN fails the advance the same way: state untouched
+R4=$(new_repo r38d); mkdir -p "$R4/docs"; printf 'Rule A.\n' > "$R4/docs/c.md"
+start "$R4" --max-rounds 3 --coder-extra docs/c.md "task" > /dev/null; L4=$(pointer "$R4"); B1=$(cat "$L4/coder-brief.md")
+echo y > "$R4/g"; coder "$L4" 1; verdicts changes_requested
+mkdir "$L4/coder-brief.md.tmp"
+OUT=$(review "$R4" 2>&1); RC=$?
+assert_eq "unwritable brief fails the advance" "1" "$RC"
+assert_contains "unwritable brief names the file" "cannot write $L4/coder-brief.md (round 1 not advanced" "$OUT"
+assert_eq "unwritable brief: round not advanced" "1" "$(st "$L4" round)"
+assert_eq "unwritable brief: brief untouched" "$B1" "$(cat "$L4/coder-brief.md")"
+assert_file "unwritable brief: review kept" "$L4/round-01-review.md"
+assert_contains "unwritable brief logged" "coder brief for round 2 could not be written; round 1 not advanced" "$(cat "$L4/loop.log")"
+rmdir "$L4/coder-brief.md.tmp"; printf 'Rule B.\n' > "$R4/docs/c.md"; verdicts approved
+OUT=$(review "$R4" 2>&1); RC=$?
+assert_eq "retry after an unwritable brief succeeds" "0" "$RC"
+assert_contains "retry after an unwritable brief resumes" "resuming its pending transition" "$OUT"
+assert_eq "retry after an unwritable brief advanced" "2" "$(st "$L4" round)"
+assert_eq "retry after an unwritable brief kept the queued verdict" "approved" "$(cat "$REVIEW_LOOP_FAKE_FILE")"
+assert_contains "round 2 brief re-rendered on the retry" "Rule B." "$(cat "$L4/coder-brief.md")"
+assert_not_contains "round 2 brief dropped the old extra" "Rule A." "$(cat "$L4/coder-brief.md")"
+assert_not_contains "a resumed advance does not run the backend afterwards" "APPROVED" "$OUT"
+assert_eq "loop still active after the resumed advance" "true" "$(st "$L4" active)"
+coder "$L4" 2; review "$R4" > /dev/null
+assert_eq "loop ends normally after a resumed round" "approved" "$(st "$L4" outcome)"
+# an installed review always has its round record: it is recorded before it is
+# installed, and a resume restores a missing record from the review itself
+R5=$(new_repo r38e); start "$R5" --max-rounds 3 --usage "task" > /dev/null; L5=$(pointer "$R5")
+echo y > "$R5/g"; coder "$L5" 1; verdicts changes_requested
+cp "$L5/state.json" "$TMP/state.bak"
+# the fake backend copies the prompt over REVIEW_LOOP_FAKE_LAST_PROMPT: pointing it
+# at state.json makes every state write after the backend fail (invalid JSON)
+OUT=$(cd "$R5" && REVIEW_LOOP_FAKE_LAST_PROMPT="$L5/state.json" bash "$S/review.sh" 2>&1); RC=$?
+assert_eq "a failed round record fails review.sh" "1" "$RC"
+assert_contains "a failed round record is explained" "cannot record round 1 in $L5/state.json (the review was not installed)" "$OUT"
+assert_no_file "a failed round record installs no review" "$L5/round-01-review.md"
+cp "$TMP/state.bak" "$L5/state.json"; verdicts changes_requested
+review "$R5" > /dev/null
+assert_eq "retry after a failed record reviews the round again" "1" "$(jq '[.rounds[] | select(.round == 1)] | length' "$L5/state.json")"
+assert_eq "retry after a failed record advanced" "2" "$(st "$L5" round)"
+mkdir "$L5/coder-brief.md.tmp"; coder "$L5" 2; verdicts changes_requested; review "$R5" > /dev/null 2>&1 || true
+assert_file "review installed although the advance failed" "$L5/round-02-review.md"
+jq 'del(.rounds[] | select(.round == 2))' "$L5/state.json" > "$L5/s.tmp" && mv "$L5/s.tmp" "$L5/state.json"
+rmdir "$L5/coder-brief.md.tmp"; verdicts approved
+OUT=$(review "$R5" 2>&1); RC=$?
+assert_eq "resume with a missing record succeeds" "0" "$RC"
+assert_contains "resume warns about the restored record" "round 2 had no record in state.json; restored from the review" "$OUT"
+assert_eq "restored record verdict" "changes_requested" "$(jq -r '.rounds[] | select(.round == 2) | .verdict' "$L5/state.json")"
+assert_eq "restored record blocking" "2" "$(jq -r '.rounds[] | select(.round == 2) | .blocking' "$L5/state.json")"
+assert_eq "restored record has unknown durations" "null null" "$(jq -r '.rounds[] | select(.round == 2) | "\(.duration_s) \(.coder_duration_s)"' "$L5/state.json")"
+assert_eq "restored record recorded once" "1" "$(jq '[.rounds[] | select(.round == 2)] | length' "$L5/state.json")"
+assert_eq "rounds in order after the restore" "1 2" "$(jq -r '[.rounds[].round] | join(" ")' "$L5/state.json")"
+assert_eq "resume with a restored record advanced" "3" "$(st "$L5" round)"
+assert_eq "restore did not run the backend" "approved" "$(cat "$REVIEW_LOOP_FAKE_FILE")"
+assert_contains "restore logged" "round 2 record restored from the installed review" "$(cat "$L5/loop.log")"
+assert_contains "usage.md marks the restored round's reviewer usage unknown" "| round 2 reviewer | unknown (record restored from the review) |" "$(cat "$L5/usage.md")"
+assert_not_contains "usage.md has no null cells for the restored round" "null" "$(cat "$L5/usage.md")"
+assert_contains "usage.md still has round 1's reviewer usage" "| round 1 reviewer | fake-model | 1000 |" "$(cat "$L5/usage.md")"
+assert_contains "usage.md marks the reviewer total incomplete" "| TOTAL reviewer (incomplete: 1 round(s) unknown) | fake-model | 1000 | 500 |" "$(cat "$L5/usage.md")"
+assert_not_contains "usage.md has no plain reviewer total with an unknown round" "| TOTAL reviewer |" "$(cat "$L5/usage.md")"
+# a reviewed round whose record is missing altogether counts as unknown too
+jq 'del(.rounds[] | select(.round == 1))' "$L5/state.json" > "$L5/s.tmp" && mv "$L5/s.tmp" "$L5/state.json"
+coder "$L5" 3; verdicts changes_requested; review "$R5" > /dev/null
+assert_eq "final round reached the cap" "max_rounds_reached" "$(st "$L5" outcome)"
+assert_contains "usage.md counts a reviewed round without a record as unknown" "| TOTAL reviewer (incomplete: 2 round(s) unknown) | fake-model | 1000 | 500 |" "$(cat "$L5/usage.md")"
+assert_contains "usage.md keeps the known round's row" "| round 3 reviewer | fake-model | 1000 |" "$(cat "$L5/usage.md")"
+# a pending transition is resumed even when the coder summary is gone: the
+# reviewer has already finished with it
+R6=$(new_repo r38f); start "$R6" --max-rounds 3 "task" > /dev/null; L6=$(pointer "$R6")
+echo y > "$R6/g"; coder "$L6" 1; verdicts changes_requested; mkdir "$L6/coder-brief.md.tmp"
+review "$R6" > /dev/null 2>&1 || true
+assert_file "review installed before the summary goes missing" "$L6/round-01-review.md"
+rm "$L6/round-01-coder.md"; rmdir "$L6/coder-brief.md.tmp"; verdicts approved
+OUT=$(review "$R6" 2>&1); RC=$?
+assert_eq "resume without the coder summary succeeds" "0" "$RC"
+assert_contains "resume without the coder summary resumes" "resuming its pending transition" "$OUT"
+assert_not_contains "resume without the coder summary does not ask for it" "coder summary missing" "$OUT"
+assert_eq "resume without the coder summary advanced" "2" "$(st "$L6" round)"
+assert_eq "resume without the coder summary did not run the backend" "approved" "$(cat "$REVIEW_LOOP_FAKE_FILE")"
+OUT=$(review "$R6" 2>&1); RC=$?
+assert_eq "a fresh round still needs the coder summary" "1" "$RC"
+assert_contains "a fresh round still asks for the coder summary" "coder summary missing. Write $L6/round-02-coder.md" "$OUT"
+(cd "$R6" && bash "$S/cancel.sh" > /dev/null)
+# the review is installed atomically: a failed write installs nothing, a stale
+# temp file is cleaned up, and a half-written file from an older version
+# (front matter but no VERDICT line in the body) is never resumed from
+R7=$(new_repo r38g); start "$R7" --max-rounds 4 "task" > /dev/null; L7=$(pointer "$R7")
+echo y > "$R7/g"; coder "$L7" 1; verdicts approved; mkdir "$L7/round-01-review.md.tmp"
+OUT=$(review "$R7" 2>&1); RC=$?
+assert_eq "a failed review write fails review.sh" "1" "$RC"
+assert_contains "a failed review write is explained" "cannot install $L7/round-01-review.md (nothing was installed" "$OUT"
+assert_no_file "a failed review write installs nothing" "$L7/round-01-review.md"
+assert_eq "a failed review write leaves the loop active" "true" "$(st "$L7" active)"
+assert_eq "a failed review write does not advance" "1" "$(st "$L7" round)"
+rmdir "$L7/round-01-review.md.tmp"; verdicts changes_requested
+OUT=$(review "$R7" 2>&1); RC=$?
+assert_eq "retry after a failed review write reviews again" "0" "$RC"
+assert_contains "retry after a failed review write uses the new verdict" "CHANGES REQUESTED in round 1" "$OUT"
+assert_no_file "no temp file left after an install" "$L7/round-01-review.md.tmp"
+assert_eq "retry after a failed review write advanced" "2" "$(st "$L7" round)"
+# a truncated review (front matter says approved, body cut before the verdict)
+printf -- '---\nverdict: approved\nround: 2\nbackend: fake\nmodel: default\nblocking: 0\ngenerated_at: now\n---\n\n## Comments\n\n## Assessment\n\nLooks go' > "$L7/round-02-review.md"
+coder "$L7" 2; verdicts changes_requested
+OUT=$(review "$R7" 2>&1); RC=$?
+assert_eq "a truncated review is not resumed from" "0" "$RC"
+assert_contains "a truncated review is reported" "round-02-review.md is incomplete (no VERDICT line in its body); moved to round-02-review.truncated.md" "$OUT"
+assert_file "a truncated review is kept aside" "$L7/round-02-review.truncated.md"
+assert_contains "the round is reviewed again" "CHANGES REQUESTED in round 2" "$OUT"
+assert_eq "the fresh review is the installed one" "changes_requested" "$(sed -n 's/^verdict: //p' "$L7/round-02-review.md" | head -1)"
+assert_eq "the truncated verdict never applied" "3" "$(st "$L7" round)"
+assert_eq "the truncated review is logged" "1" "$(grep -c "round 2 review has no verdict line in its body" "$L7/loop.log")"
+# a stale temp file from an interrupted write is cleaned up, never installed
+printf 'half-written\n' > "$L7/round-03-review.md.tmp"; coder "$L7" 3; verdicts approved
+OUT=$(review "$R7" 2>&1); RC=$?
+assert_eq "a stale temp file does not block the review" "0" "$RC"
+assert_contains "a stale temp file: the round is reviewed normally" "APPROVED in round 3" "$OUT"
+assert_no_file "a stale temp file is removed" "$L7/round-03-review.md.tmp"
+assert_eq "a stale temp file: the installed review is the fresh one" "approved" "$(sed -n 's/^verdict: //p' "$L7/round-03-review.md" | head -1)"
+# a directory at the final review path is refused (mv would drop the file inside it)
+R8=$(new_repo r38h); start "$R8" --max-rounds 3 "task" > /dev/null; L8=$(pointer "$R8")
+echo y > "$R8/g"; coder "$L8" 1; verdicts approved; mkdir "$L8/round-01-review.md"
+OUT=$(review "$R8" 2>&1); RC=$?
+assert_eq "a directory at the review path fails review.sh" "1" "$RC"
+assert_contains "a directory at the review path is explained" "cannot install $L8/round-01-review.md (nothing was installed" "$OUT"
+assert_eq "a directory at the review path: nothing moved inside it" "0" "$(ls -A "$L8/round-01-review.md" | wc -l | tr -d ' ')"
+assert_no_file "a directory at the review path: no temp file left" "$L8/round-01-review.md.tmp"
+assert_eq "a directory at the review path: round not advanced" "1" "$(st "$L8" round)"
+assert_eq "a directory at the review path: loop still active" "true" "$(st "$L8" active)"
+rmdir "$L8/round-01-review.md"; verdicts changes_requested
+OUT=$(review "$R8" 2>&1); RC=$?
+assert_eq "retry after a directory at the review path reviews again" "0" "$RC"
+assert_contains "retry after a directory at the review path uses the new verdict" "CHANGES REQUESTED in round 1" "$OUT"
+assert_file "retry after a directory at the review path installs the review" "$L8/round-01-review.md"
+assert_eq "retry after a directory at the review path advanced" "2" "$(st "$L8" round)"
+# coder usage survives a retry of the same round: the round's baseline is kept,
+# so the work done before the failed attempt (and the fixing) is all counted
+R9=$(new_repo r38i); start "$R9" --max-rounds 3 --usage "task" > /dev/null; L9=$(pointer "$R9"); echo y > "$R9/g"
+TR9="$TMP/transcript-retry.jsonl"
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:01.000Z","message":{"id":"r1","model":"claude-x","usage":{"input_tokens":10,"output_tokens":100}}}' > "$TR9"
+jq --arg t "$TR9" '.started_at = "2020-01-01T00:00:00Z" | .transcript_path = $t' "$L9/state.json" > "$L9/s.tmp" && mv "$L9/s.tmp" "$L9/state.json"
+coder "$L9" 1; verdicts changes_requested; mkdir "$L9/round-01-review.md"
+review "$R9" > /dev/null 2>&1 || true
+assert_eq "failed install: round 1 coder usage recorded" "100" "$(jq '.rounds[0].coder.output_tokens' "$L9/state.json")"
+assert_eq "failed install: cumulative advanced" "100" "$(jq '.coder_usage_cum.output_tokens' "$L9/state.json")"
+assert_eq "failed install: round 1 baseline is the start of the loop" "null" "$(jq '.coder_usage_base' "$L9/state.json")"
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:02.000Z","message":{"id":"r2","model":"claude-x","usage":{"input_tokens":1,"output_tokens":25}}}' >> "$TR9"
+rmdir "$L9/round-01-review.md"; verdicts changes_requested; review "$R9" > /dev/null
+assert_eq "retry: round 1 coder usage keeps the earlier work" "125" "$(jq '.rounds[0].coder.output_tokens' "$L9/state.json")"
+assert_eq "retry: round 1 recorded once" "1" "$(jq '.rounds | length' "$L9/state.json")"
+assert_eq "retry: cumulative is the session total" "125" "$(jq '.coder_usage_cum.output_tokens' "$L9/state.json")"
+assert_eq "retry: advanced to round 2" "2" "$(st "$L9" round)"
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:03.000Z","message":{"id":"r3","model":"claude-x","usage":{"input_tokens":1,"output_tokens":10}}}' >> "$TR9"
+coder "$L9" 2; verdicts changes_requested; mkdir "$L9/round-02-review.md"
+review "$R9" > /dev/null 2>&1 || true
+assert_eq "round 2 failed install: delta from round 1" "10" "$(jq '.rounds[1].coder.output_tokens' "$L9/state.json")"
+assert_eq "round 2 failed install: baseline is round 1's total" "125" "$(jq '.coder_usage_base.output_tokens' "$L9/state.json")"
+echo '{"type":"assistant","timestamp":"2021-01-01T00:00:04.000Z","message":{"id":"r4","model":"claude-x","usage":{"input_tokens":1,"output_tokens":5}}}' >> "$TR9"
+rmdir "$L9/round-02-review.md"; verdicts approved; review "$R9" > /dev/null
+assert_eq "round 2 retry: usage since round 1, not since the failed attempt" "15" "$(jq '.rounds[1].coder.output_tokens' "$L9/state.json")"
+assert_eq "round 2 retry: round 1 untouched" "125" "$(jq '.rounds[0].coder.output_tokens' "$L9/state.json")"
+assert_eq "round 2 retry: cumulative is the session total" "140" "$(jq '.coder_usage_cum.output_tokens' "$L9/state.json")"
+assert_eq "round 2 retry: loop approved" "approved" "$(st "$L9" outcome)"
+assert_contains "usage.md shows the retried round's full coder usage" "| round 2 coder | claude-x | 2 | 0 | 0 | 15 |" "$(cat "$L9/usage.md")"
+# missing files block start and review with a clear message, creating nothing
+OUT=$(start "$R" --coder-extra docs/missing.md "t" 2>&1); RC=$?
+assert_eq "missing coder extra blocks start" "1" "$RC"
+assert_contains "missing coder extra names the key" "prompts.coder_extra points to a missing file: $R/docs/missing.md" "$OUT"
+assert_no_file "missing prompt file: no loop created" "$R/.claude/review-loop.active"
+(cd "$R" && bash "$C" set prompts.reviewer=docs/gone.md > /dev/null 2>&1)
+OUT=$(start "$R" "t" 2>&1); RC=$?
+assert_eq "missing reviewer template blocks start" "1" "$RC"
+assert_contains "missing reviewer template names the key" "prompts.reviewer points to a missing file" "$OUT"
+(cd "$R" && bash "$C" unset prompts.reviewer > /dev/null)
+start "$R" "t" > /dev/null; L=$(pointer "$R"); echo z > "$R/h"; coder "$L" 1
+rm "$R/docs/reviewer.md"
+OUT=$(review "$R" 2>&1); RC=$?
+assert_eq "extra file removed mid-loop fails review.sh" "1" "$RC"
+assert_contains "review.sh names the missing key" "prompts.reviewer_extra points to a missing file" "$OUT"
+assert_no_file "no review installed when the prompt cannot be built" "$L/round-01-review.md"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null); (cd "$R" && bash "$C" unset prompts.coder_extra prompts.reviewer_extra > /dev/null)
+# unreadable files are errors too, named by key; --force never cancels before the brief renders
+printf 'secret\n' > "$R/docs/unreadable.md"; chmod 000 "$R/docs/unreadable.md"
+OUT=$(start "$R" --coder-extra docs/unreadable.md "t" 2>&1); RC=$?
+assert_eq "unreadable coder extra blocks start" "1" "$RC"
+assert_contains "unreadable file names the key" "prompts.coder_extra points to an unreadable file: $R/docs/unreadable.md" "$OUT"
+start "$R" "running" > /dev/null; LRUN=$(pointer "$R")
+OUT=$(start "$R" --force --coder-prompt docs/unreadable.md "t" 2>&1); RC=$?
+assert_eq "unreadable replacement with --force fails" "1" "$RC"
+assert_eq "--force with a bad brief leaves the old loop active" "true" "$(st "$LRUN" active)"
+assert_eq "--force with a bad brief keeps the pointer" "$LRUN" "$(pointer "$R")"
+echo q > "$R/j"; coder "$LRUN" 1
+(cd "$R" && bash "$C" set prompts.reviewer_extra=docs/unreadable.md > /dev/null 2>&1)
+jq '.prompts.reviewer_extra = "docs/unreadable.md"' "$LRUN/state.json" > "$LRUN/s.tmp" && mv "$LRUN/s.tmp" "$LRUN/state.json"
+OUT=$(review "$R" 2>&1); RC=$?
+assert_eq "unreadable reviewer extra fails review.sh" "1" "$RC"
+assert_contains "review.sh names the unreadable key" "prompts.reviewer_extra points to an unreadable file" "$OUT"
+assert_no_file "no review installed on unreadable extra" "$LRUN/round-01-review.md"
+chmod 644 "$R/docs/unreadable.md"; (cd "$R" && bash "$C" unset prompts.reviewer_extra > /dev/null); (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+# a replacement template without {{EXTRA}} still gets the extras appended
+printf 'MINIMAL {{TASK}}\n{{REVIEW_FORMAT}}\n' > "$R/docs/min-rev.md"; printf 'MINIMAL BRIEF {{TASK}}\n' > "$R/docs/min-brief.md"
+printf 'Extra for reviewer.\n' > "$R/docs/rx.md"; printf 'Extra for coder.\n' > "$R/docs/cx.md"
+start "$R" --reviewer-prompt docs/min-rev.md --coder-prompt docs/min-brief.md --reviewer-extra docs/rx.md --coder-extra docs/cx.md "t" > /dev/null; L=$(pointer "$R")
+assert_contains "brief without {{EXTRA}} still appends the extra" "Extra for coder." "$(cat "$L/coder-brief.md")"
+assert_contains "appended brief extra keeps its heading" "## Additional instructions for the coder" "$(cat "$L/coder-brief.md")"
+echo k > "$R/k"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
+assert_contains "reviewer template without {{EXTRA}} still appends the extra" "Extra for reviewer." "$(cat "$L/round-01-prompt.md")"
+assert_not_contains "appended extras leave no placeholder" "{{" "$(cat "$L/round-01-prompt.md")$(cat "$L/coder-brief.md")"
+# defaults: no extra section at all
+start "$R" "plain" > /dev/null; L=$(pointer "$R"); echo w > "$R/i"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
+assert_not_contains "no extra section without config" "Additional instructions" "$(cat "$L/round-01-prompt.md")$(cat "$L/coder-brief.md")"
+assert_not_contains "default brief leaves no placeholder" "{{" "$(cat "$L/coder-brief.md")"
+assert_contains "default templates unchanged for the reviewer" "You are an independent, senior code reviewer." "$(cat "$L/round-01-prompt.md")"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

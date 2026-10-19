@@ -236,6 +236,9 @@ var RL = (function () {
     const start = Date.parse(st.started_at), end = Date.parse(st.finished_at);
     const duration = (!isNaN(start) && !isNaN(end)) ? Math.round((end - start) / 1000) : null;
     const coder = sumUsage(rounds, 'coder'), reviewer = sumUsage(rounds, 'reviewer');
+    // Rounds restored from their review file carry no reviewer usage: the
+    // reviewer sum is then a lower bound, and the tooltip says so.
+    const reviewerUnknown = st.usage ? rounds.filter(r => r.reviewer == null).length : 0;
     const cost = (coder.cost_usd != null || reviewer.cost_usd != null) ? (coder.cost_usd || 0) + (reviewer.cost_usd || 0) : null;
     // Coder time: only a total when EVERY round recorded it; otherwise it is
     // partial (some rounds predate round timing) or absent.
@@ -246,7 +249,7 @@ var RL = (function () {
       : (withCoder.length < rounds.length ? 'partial' : (underestimated ? 'underestimated' : 'complete'));
     const reviewTime = rounds.reduce((a, r) => a + (r.duration_s || 0), 0);
     return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), st, rounds, roundCount, outcome, duration, coder, reviewer, cost,
-      files, summary: l.summary, usage: !!st.usage || rounds.some(r => r.reviewer || r.coder),
+      files, summary: l.summary, usage: !!st.usage || rounds.some(r => r.reviewer || r.coder), reviewerUnknown,
       coderTime, coderTimeState, coderRoundsRecorded: withCoder.length, coderRoundsUnderestimated: underestimated, reviewTime };
   }
   // Durations never round up: "45s", "1m 30s", "2m", "1h 02m". Floor-based so a
@@ -557,7 +560,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     barChart($('#chart-tokens'), tokRows.map(l => ({
       id: l.id, label: label(l),
       segments: [{ name: 'coder', value: l.coder.output_tokens || 0, color: 'var(--s1)' }, { name: 'reviewer', value: l.reviewer.output_tokens || 0, color: 'var(--s2)' }],
-      tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${fmtNum(s.value)} output tokens<br>coder ${fmtNum(l.coder.output_tokens)} · reviewer ${fmtNum(l.reviewer.output_tokens)}${l.cost != null ? ' · ' + fmtCost(l.cost) : ''}`
+      tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${fmtNum(s.value)} output tokens<br>coder ${fmtNum(l.coder.output_tokens)} · reviewer ${l.reviewerUnknown ? '≥ ' : ''}${fmtNum(l.reviewer.output_tokens)}${l.cost != null ? ' · ' + fmtCost(l.cost) : ''}${l.reviewerUnknown ? `<br>reviewer usage unknown for ${l.reviewerUnknown} round(s)` : ''}`
     })), { label: 'Output tokens per loop' });
 
     // table

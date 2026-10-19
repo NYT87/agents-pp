@@ -233,7 +233,7 @@ rl_config_files() {
 # (for a shared file: its top-level keys, then its providers.<provider>
 # section), REVIEW_LOOP_* env. Flags are applied by start.sh.
 rl_resolve_config() {
-  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false}}'
+  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false},"prompts":{"reviewer":"","reviewer_extra":"","coder":"","coder_extra":""}}'
   local cfg="$defaults" env_cfg label path kind file_cfg p merged
   p=$(rl_provider)
   while IFS=$'\t' read -r label path kind; do
@@ -271,6 +271,86 @@ rl_resolve_config() {
      + (if $dopen != "" then {dashboard: {open: ($dopen | ascii_downcase | IN("1","true","yes","on"))}} else {} end)
      + (if $dout  != "" then {dashboard: {out: $dout}} else {} end)')
   jq -cn --argjson c "$cfg" --argjson e "$env_cfg" '$c * $e'
+}
+
+# ── Role prompts ─────────────────────────────────────────────────────────────
+# prompts.reviewer / prompts.coder   file that REPLACES the role's template
+# prompts.reviewer_extra / coder_extra  file APPENDED as project instructions
+# Values are file paths: absolute, ~/..., or relative to the project root.
+
+# rl_prompt_path ROOT VALUE -> absolute path ("" when VALUE is empty)
+rl_prompt_path() {
+  local v="$2"
+  [ -n "$v" ] || { echo ""; return 0; }
+  case "$v" in
+    "~"|"~/"*) v="$HOME${v#"~"}" ;;
+  esac
+  rl_abs_dir "$1" "$v"
+}
+
+# rl_prompt_file ROOT VALUE ROLE WHAT -> prints the absolute path when VALUE
+# names a readable file; prints nothing when VALUE is empty; dies otherwise.
+rl_prompt_file() {
+  local path
+  path=$(rl_prompt_path "$1" "$2")
+  [ -n "$path" ] || return 0
+  [ -f "$path" ] || rl_die "prompts.$3$4 points to a missing file: $path (set it with: config.sh set prompts.$3$4=PATH, or unset it)"
+  [ -r "$path" ] || rl_die "prompts.$3$4 points to an unreadable file: $path (check its permissions)"
+  echo "$path"
+}
+
+# rl_read_prompt PATH LABEL -> the file's content; dies (naming LABEL) when the
+# read itself fails, so a prompt is never silently blank or truncated.
+rl_read_prompt() {
+  local text
+  text=$(cat "$1") || rl_die "cannot read $2: $1"
+  printf '%s' "$text"
+}
+
+# rl_render TEMPLATE_TEXT NAME=VALUE... -> replaces every {{NAME}} with VALUE
+rl_render() {
+  local text="$1" pair name value; shift
+  for pair in "$@"; do
+    name="${pair%%=*}"; value="${pair#*=}"
+    text=${text//"{{$name}}"/$value}
+  done
+  printf '%s' "$text"
+}
+
+# rl_role_prompt ROOT ROLE DEFAULT_TEMPLATE REPLACEMENT EXTRA -> the role's
+# template text: the replacement file (if set) or DEFAULT_TEMPLATE, with the
+# extra file (if set) available as {{EXTRA}} wrapped in a heading, else "".
+rl_role_prompt() {
+  local root="$1" role="$2" default="$3" repl="$4" extra="$5" tpl extra_text="" f
+  # Every missing, unreadable or failed read is an error (rl_prompt_file and
+  # rl_read_prompt die); the "|| exit 1" propagates it out of the command
+  # substitution the callers use.
+  f=$(rl_prompt_file "$root" "$repl" "$role" "") || exit 1
+  if [ -n "$f" ]; then tpl=$(rl_read_prompt "$f" "prompts.$role") || exit 1
+  else tpl=$(rl_read_prompt "$default" "the default $role template") || exit 1; fi
+  f=$(rl_prompt_file "$root" "$extra" "$role" "_extra") || exit 1
+  if [ -n "$f" ]; then
+    extra_text="## Additional instructions for the $role (from $f)"$'\n\n'"$(rl_read_prompt "$f" "prompts.${role}_extra")" || exit 1
+    # A replacement template without {{EXTRA}} still gets the extras appended:
+    # the key promises appended instructions, so they must never vanish.
+    case "$tpl" in *'{{EXTRA}}'*) ;; *) tpl="$tpl"$'\n\n{{EXTRA}}' ;; esac
+  fi
+  rl_render "$tpl" "EXTRA=$extra_text"
+}
+
+# rl_coder_brief LOOP_DIR -> the coder brief on stdout: the role's template (or
+# its configured replacement) with the task and paths filled in, plus any
+# configured extra instructions. Everything comes from state.json and the
+# prompt files as they are now, so callers can re-render it for a later round.
+rl_coder_brief() {
+  local dir="$1" prompts root brief
+  prompts=$(jq -c '.prompts // {}' "$dir/state.json")
+  root=$(rl_state_get "$dir" root)
+  brief=$(rl_role_prompt "$root" coder "$RL_TEMPLATES_DIR/coder-brief.md" \
+    "$(jq -r '.coder // ""' <<< "$prompts")" "$(jq -r '.coder_extra // ""' <<< "$prompts")") || exit 1
+  rl_render "$brief" "LOOP_ID=$(rl_state_get "$dir" loop_id)" "TASK=$(cat "$dir/task.md")" "LOOP_DIR=$dir" \
+    "SCRIPTS=$RL_SCRIPTS_DIR" "TEMPLATES=$RL_TEMPLATES_DIR" "BACKEND=$(rl_state_get "$dir" backend)" \
+    "MAX_ROUNDS=$(rl_state_get "$dir" max_rounds)" "ROOT=$root"
 }
 
 # rl_config_source KEY -> label of the highest-precedence source that sets KEY
@@ -358,6 +438,19 @@ rl_parse_verdict() {
   v=$(printf '%s' "$line" | grep -oiE 'approved|changes_requested' | head -1 | tr '[:upper:]' '[:lower:]')
   [ -n "$v" ] || return 1
   echo "$v"
+}
+
+# rl_review_meta FILE KEY -> the value of KEY in an installed review's front
+# matter (the leading "---" block review.sh writes), or nothing.
+rl_review_meta() {
+  awk -v k="$2" 'NR == 1 { if ($0 != "---") exit; next }
+                 /^---$/ { exit }
+                 index($0, k ": ") == 1 { print substr($0, length(k) + 3); exit }' "$1"
+}
+
+# rl_review_body FILE -> an installed review without its front matter.
+rl_review_body() {
+  awk 'NR == 1 { if ($0 == "---") { fm = 1; next } } fm { if ($0 == "---") fm = 0; next } { print }' "$1"
 }
 
 # rl_validate_review FILE VERDICT -> prints a problem description and returns 1
@@ -511,18 +604,31 @@ rl_usage_row() { # LABEL USAGE_JSON [DURATION]
 
 # rl_usage_table LOOP_DIR -> Markdown table of per-round usage plus totals
 rl_usage_table() {
-  local dir="$1" round label coder reviewer dur coder_total reviewer_total
+  local dir="$1" round label coder reviewer dur coder_total reviewer_total unknown known f n
   echo "| Round / agent | Model | Input (uncached) | Cached input | Cache write | Output | Reasoning | Cost USD | Turns | Duration s |"
   echo "|---|---|---|---|---|---|---|---|---|---|"
   while IFS=$'\t' read -r round coder reviewer dur cdur; do
     [ -n "$round" ] || continue
     if [ "$coder" != "null" ]; then rl_usage_row "round $round coder" "$coder" "$cdur"; fi
-    rl_usage_row "round $round reviewer" "$reviewer" "$dur"
+    # A record restored from the installed review carries no reviewer usage.
+    if [ "$reviewer" != "null" ]; then rl_usage_row "round $round reviewer" "$reviewer" "$dur"
+    else echo "| round $round reviewer | unknown (record restored from the review) | - | - | - | - | - | - | - | - |"; fi
   done < <(jq -r '.rounds[]? | [.round, (.coder | tojson), (.reviewer | tojson), (.duration_s // "-"), (.coder_duration_s // "-")] | @tsv' "$dir/state.json" 2>/dev/null)
   coder_total=$(rl_coder_usage_cumulative "$dir") || coder_total=""
   reviewer_total=$(rl_reviewer_usage_total "$dir")
   if [ -n "$coder_total" ]; then rl_usage_row "TOTAL coder" "$coder_total"; else echo "| TOTAL coder | n/a (no session transcript found) | | | | | | | | |"; fi
-  rl_usage_row "TOTAL reviewer" "$reviewer_total"
+  # The total only covers rounds with usage: say so when a reviewed round
+  # (a review file on disk) has none, whether its record was restored from the
+  # review (reviewer null) or is missing altogether.
+  known=$(jq -r '.rounds[]? | select(.reviewer != null) | .round' "$dir/state.json" 2>/dev/null) || known=""
+  unknown=0
+  for f in "$dir"/round-[0-9][0-9]-review.md; do
+    [ -f "$f" ] || continue
+    n=$(sed -n 's/.*round-0*\([0-9][0-9]*\)-review\.md$/\1/p' <<< "$f")
+    printf '%s\n' "$known" | grep -qx "$n" || unknown=$((unknown + 1))
+  done
+  if [ "$unknown" -gt 0 ]; then rl_usage_row "TOTAL reviewer (incomplete: $unknown round(s) unknown)" "$reviewer_total"
+  else rl_usage_row "TOTAL reviewer" "$reviewer_total"; fi
 }
 
 # rl_write_usage_md LOOP_DIR

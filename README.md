@@ -93,6 +93,7 @@ What happens:
 ```
 .review-loop/20261015-143000-a1b2c3/
 ├── task.md               the task
+├── coder-brief.md        the coder's instructions (template + configured extras)
 ├── state.json            loop state (round, backend, base commit, session, per-round timings, ...)
 ├── round-01-coder.md     coder: what changed, files, how it was verified
 ├── round-01-prompt.md    the exact prompt the reviewer received
@@ -109,6 +110,24 @@ Add `.review-loop/` and `.claude/review-loop.active` to `.gitignore` if you do n
 ### Round timings
 
 Every round records two durations in `state.json` (`rounds[]`): `coder_duration_s`, the time from the start of the round (loop start, or the previous review's end) until `review.sh` is run, with time spent paused for the user and time spent in failed reviewer attempts excluded (the plugin's `UserPromptSubmit` hook marks your reply as the end of a pause); and `duration_s`, the successful reviewer run itself. Rounds recorded before this existed show `-`. They show up in `review.sh` output ("coder 12m 30s, review 1m 24s"), `/review-status` (current round so far and all recorded rounds), `summary.md`, `usage.md`, and the dashboard (per-loop coder and review columns, a time-per-loop chart, and chips on each round).
+
+### Role prompts: extend or replace what each agent is told
+
+Each round's reviewer prompt is rendered from `templates/reviewer-prompt.md` (saved as `round-NN-prompt.md`), and the coder gets a brief rendered from `templates/coder-brief.md` (saved as `coder-brief.md` in the loop folder and printed by `start.sh`). Both can be extended with project instructions or replaced entirely, per project or per user, through four config keys holding file paths (absolute, `~/...`, or relative to the project root):
+
+| Key | Effect |
+|---|---|
+| `prompts.reviewer_extra` | file appended to the reviewer prompt under "Additional instructions for the reviewer" |
+| `prompts.coder_extra` | file appended to the coder brief under "Additional instructions for the coder" |
+| `prompts.reviewer` | file that replaces the reviewer template; same `{{placeholders}}`: `TASK`, `ROUND`, `MAX_ROUNDS`, `CODER_SUMMARY`, `PREVIOUS_REVIEWS`, `DIFF_INSTRUCTIONS`, `REVIEW_FORMAT`, `LOOP_DIR`, `ROOT`, `BACKEND`, `EXTRA` |
+| `prompts.coder` | file that replaces the coder brief template; placeholders `TASK`, `LOOP_ID`, `LOOP_DIR`, `SCRIPTS`, `TEMPLATES`, `BACKEND`, `MAX_ROUNDS`, `ROOT`, `EXTRA` |
+
+```bash
+bash $CFG set prompts.reviewer_extra=docs/review-guidelines.md prompts.coder_extra=docs/coding-conventions.md
+/review-loop add the export endpoint --reviewer-extra docs/security-checklist.md   # per run
+```
+
+A replacement reviewer template must still end with the required output format (`{{REVIEW_FORMAT}}`) so verdicts stay machine-parseable; if a replacement template has no `{{EXTRA}}`, configured extras are appended at the end anyway. Paths are frozen into `state.json` when the loop starts and the files are read at each use, so edits apply to the next round: the reviewer prompt is built each round, and `coder-brief.md` is re-rendered whenever `review.sh` advances to a new round (its output tells the coder to re-read it). A missing or unreadable file stops `start.sh` (before it creates or cancels anything) or `review.sh` with a message naming the key. For the reviewer's files that happens before the reviewer runs; the coder's files are only needed when a new round starts, so a missing one never blocks an approval or the final round: `review.sh` keeps the review on disk and leaves the round where it is; the coder fixes the file and runs it again, and that run resumes from the installed review (verdict and comments unchanged) without calling the reviewer a second time.
 
 ### Verdict rules
 
@@ -214,6 +233,7 @@ With `dir` set to the project root (`.`), `gitignore` writes a pattern matching 
 | Max review rounds | `--max-rounds` | `REVIEW_LOOP_MAX_ROUNDS` | `max_rounds` | `5` (1 to 9007199254740991) |
 | Storage dir | `--dir` | `REVIEW_LOOP_DIR` | `dir` | `.review-loop` |
 | Usage tracking | `--usage` / `--no-usage` | `REVIEW_LOOP_USAGE` | `usage` | `false` |
+| Role prompts | `--reviewer-prompt` / `--reviewer-extra` / `--coder-prompt` / `--coder-extra` | | `prompts.{reviewer,reviewer_extra,coder,coder_extra}` | templates in `templates/` |
 | Dashboard | `--dir` / `--out` / `--open` | `REVIEW_LOOP_DASHBOARD_OPEN`, `REVIEW_LOOP_DASHBOARD_OUT` | `dashboard.{dirs,out,open,auto}` | loop dir, `<dir>/dashboard.html`, `true`, `false` |
 
 Example `~/.config/review-loop/config.json`:
@@ -284,7 +304,7 @@ agents-pp/
 │       │   ├── SKILL.md
 │       │   ├── scripts/                   lib.sh, start.sh, review.sh, stop-hook.sh, resume-hook.sh, status.sh, cancel.sh, dashboard.sh, config.sh
 │       │   ├── scripts/backends/          codex.sh, claude.sh, fake.sh
-│       │   └── templates/                 reviewer-prompt.md, coder-summary.md, review-format.md, dashboard.html
+│       │   └── templates/                 reviewer-prompt.md, coder-brief.md, coder-summary.md, review-format.md, dashboard.html
 │       ├── review-status/SKILL.md
 │       ├── review-cancel/SKILL.md
 │       ├── review-dashboard/SKILL.md

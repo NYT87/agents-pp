@@ -132,6 +132,8 @@ fi
 NN=$(rl_round_nn "$ROUND")
 CODER_FILE="$RL_LOOP_DIR/round-$NN-coder.md"
 MSG="Review loop $RL_LOOP_ID is active (round $ROUND of $MAX_ROUNDS) and the reviewer has not approved the work yet. Do not stop until it does."
+[ -f "$RL_LOOP_DIR/coder-brief.md" ] && MSG+="
+Your brief, including any project-specific instructions: $RL_LOOP_DIR/coder-brief.md"
 if [ "$ROUND" -gt 1 ]; then
   PREV_NN=$(rl_round_nn "$(( ROUND - 1 ))")
   MSG+="

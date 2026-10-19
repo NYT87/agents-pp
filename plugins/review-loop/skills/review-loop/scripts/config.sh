@@ -33,16 +33,20 @@
 #   dashboard.out   dashboard output file ("" = <dir>/dashboard.html)  string
 #   dashboard.open  open the dashboard in the browser                   boolean
 #   dashboard.auto  regenerate the dashboard whenever a loop ends       boolean
+#   prompts.reviewer        file replacing the reviewer prompt template  path
+#   prompts.reviewer_extra  file appended to the reviewer prompt         path
+#   prompts.coder           file replacing the coder brief template      path
+#   prompts.coder_extra     file appended to the coder brief             path
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 command -v jq > /dev/null 2>&1 || rl_die "'jq' is required"
 
-KEYS="backend model max_rounds dir usage dashboard.dirs dashboard.out dashboard.open dashboard.auto"
+KEYS="backend model max_rounds dir usage dashboard.dirs dashboard.out dashboard.open dashboard.auto prompts.reviewer prompts.reviewer_extra prompts.coder prompts.coder_extra"
 key_type() {
   case "$1" in
-    backend|model|dir|dashboard.out) echo string ;;
+    backend|model|dir|dashboard.out|prompts.reviewer|prompts.reviewer_extra|prompts.coder|prompts.coder_extra) echo string ;;
     max_rounds) echo integer ;;
     usage|dashboard.open|dashboard.auto) echo boolean ;;
     dashboard.dirs) echo list ;;
@@ -50,7 +54,7 @@ key_type() {
   esac
 }
 # Keys that may legitimately be empty; the wizard clears them with "-".
-key_clearable() { case "$1" in model|dashboard.out|dashboard.dirs) return 0 ;; *) return 1 ;; esac; }
+key_clearable() { case "$1" in model|dashboard.out|dashboard.dirs|prompts.*) return 0 ;; *) return 1 ;; esac; }
 
 key_help() {
   case "$1" in
@@ -63,10 +67,14 @@ key_help() {
     dashboard.out) echo "dashboard output file (empty = <dir>/dashboard.html)" ;;
     dashboard.open) echo "open the dashboard in the browser after generating it" ;;
     dashboard.auto) echo "regenerate the dashboard automatically whenever a loop ends" ;;
+    prompts.reviewer) echo "file that replaces the reviewer prompt template (same {{placeholders}})" ;;
+    prompts.reviewer_extra) echo "file appended to the reviewer prompt as project instructions" ;;
+    prompts.coder) echo "file that replaces the coder brief template (same {{placeholders}})" ;;
+    prompts.coder_extra) echo "file appended to the coder brief as project instructions" ;;
   esac
 }
 
-usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 CMD="${1:-}"; [ $# -gt 0 ] && shift
@@ -172,6 +180,11 @@ coerce() {
           || { echo "unknown backend '$raw' (available: $(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | tr '\n' ' ' | sed 's/ $//'))" >&2; return 1; }
       fi
       if [ "$key" = "dir" ] && [ -z "$raw" ]; then echo "dir cannot be empty" >&2; return 1; fi
+      case "$key" in prompts.*)
+        if [ -n "$raw" ] && [ ! -f "$(rl_prompt_path "$ROOT" "$raw")" ]; then
+          echo "note: $key: $(rl_prompt_path "$ROOT" "$raw") does not exist yet; the loop will fail until it does" >&2
+        fi ;;
+      esac
       jq -n --arg v "$raw" '$v' ;;
     integer)
       printf '%s' "$raw" | grep -qE '^[1-9][0-9]*$' || { echo "$key must be a positive integer (got '$raw')" >&2; return 1; }
