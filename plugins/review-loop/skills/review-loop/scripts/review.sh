@@ -26,6 +26,12 @@ BASE_REF=$(rl_state_get "$RL_LOOP_DIR" base_ref)
 DIR=$(rl_state_get "$RL_LOOP_DIR" dir)
 NN=$(rl_round_nn "$ROUND")
 USAGE_ON=0; rl_usage_enabled "$RL_LOOP_DIR" && USAGE_ON=1
+PROTOCOL_VERSION=$(rl_state_get "$RL_LOOP_DIR" protocol_version)
+case "$PROTOCOL_VERSION" in
+  ''|null) PROTOCOL_VERSION=1 ;;
+  1|2) ;;
+  *) rl_die "unsupported review protocol version '$PROTOCOL_VERSION'" ;;
+esac
 
 CODER_FILE="$RL_LOOP_DIR/round-$NN-coder.md"
 PROMPT_FILE="$RL_LOOP_DIR/round-$NN-prompt.md"
@@ -126,7 +132,7 @@ if [ -f "$REVIEW_FILE" ]; then
     *) rl_die "the installed review $REVIEW_FILE has no usable verdict in its front matter. Move it away, then run this script again." ;;
   esac
   BLOCKING=$(rl_review_meta "$REVIEW_FILE" blocking)
-  case "$BLOCKING" in ''|*[!0-9]*) BLOCKING=$(rl_count_blocking "$REVIEW_FILE") ;; esac
+  case "$BLOCKING" in ''|*[!0-9]*) BLOCKING=$(rl_count_blocking "$REVIEW_FILE" "$PROTOCOL_VERSION") ;; esac
   RINFO=$(jq -c --argjson r "$ROUND" '((.rounds // []) | map(select(.round == $r)) | last) // {}' "$RL_LOOP_DIR/state.json")
   if [ "$RINFO" = "{}" ]; then
     # Reviews are recorded before they are installed, so a missing record means
@@ -156,6 +162,13 @@ if [ ! -s "$CODER_FILE" ]; then
   rl_die "coder summary missing. Write $CODER_FILE (template: $RL_TEMPLATES_DIR/coder-summary.md), then run this script again."
 fi
 [ -f "$BACKEND_SCRIPT" ] || rl_die "unknown backend '$BACKEND' ($BACKEND_SCRIPT not found)"
+HISTORY='{"ids":[],"required_coder_ids":[]}'
+if [ "$PROTOCOL_VERSION" = "2" ]; then
+  HISTORY=$(rl_review_history "$RL_LOOP_DIR" "$ROUND") || rl_die "$HISTORY"
+  if ! PROBLEM=$(rl_validate_coder "$CODER_FILE" "$HISTORY"); then
+    rl_die "invalid coder responses: $PROBLEM. Fix $CODER_FILE, then run this script again (the reviewer was not run)."
+  fi
+fi
 # Leftovers of an interrupted run; anything that cannot be removed (say, a
 # directory in the way) fails the install below with a clear message instead.
 rm -f "$RAW_FILE" "$RAW_FILE.tmp" "$REVIEW_FILE.tmp" 2> /dev/null || true
@@ -261,14 +274,16 @@ if ! VERDICT=$(rl_parse_verdict "$RAW_FILE"); then
   rl_log "$RL_LOOP_DIR" "review.sh: no verdict found in backend output (${ELAPSED}s)"
   rl_die "the reviewer's output contains no 'VERDICT: approved|changes_requested' line (kept at $RL_LOOP_DIR/round-$NN-review.invalid.md). Run this script again."
 fi
-if ! PROBLEM=$(rl_validate_review "$RAW_FILE" "$VERDICT"); then
+VALIDATE_ARGS=("$RAW_FILE" "$VERDICT")
+if [ "$PROTOCOL_VERSION" = "2" ]; then VALIDATE_ARGS+=("$ROUND" "$HISTORY"); fi
+if ! PROBLEM=$(rl_validate_review "${VALIDATE_ARGS[@]}"); then
   note_failed_attempt
   mv "$RAW_FILE" "$RL_LOOP_DIR/round-$NN-review.invalid.md"
   rm -f "$RAW_FILE".*
   rl_log "$RL_LOOP_DIR" "review.sh: review rejected: $PROBLEM (${ELAPSED}s)"
   rl_die "the reviewer's output is not a usable review: $PROBLEM (kept at $RL_LOOP_DIR/round-$NN-review.invalid.md). Run this script again."
 fi
-BLOCKING=$(rl_count_blocking "$RAW_FILE")
+BLOCKING=$(rl_count_blocking "$RAW_FILE" "$PROTOCOL_VERSION")
 if [ "$VERDICT" = "approved" ] && [ "$BLOCKING" -gt 0 ]; then
   rl_log "$RL_LOOP_DIR" "review.sh: verdict 'approved' downgraded to 'changes_requested' ($BLOCKING blocking item(s))"
   echo "review-loop: reviewer said 'approved' but listed $BLOCKING blocking item(s); treating as changes_requested"
@@ -323,6 +338,7 @@ if ! {
     echo "---"
     echo "verdict: $VERDICT"
     echo "round: $ROUND"
+    echo "protocol_version: $PROTOCOL_VERSION"
     echo "backend: $BACKEND"
     echo "model: ${MODEL:-default}"
     echo "effort: ${EFFORT:-default}"

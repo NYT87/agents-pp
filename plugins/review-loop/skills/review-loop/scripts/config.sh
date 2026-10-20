@@ -10,8 +10,8 @@
 #                                                 model / dashboard.out / dashboard.dirs)
 #   config.sh gitignore [--dry-run]               add the loop's paths to .gitignore
 #   config.sh keys [--json]                       list keys with types and descriptions
-#   config.sh models [--backend NAME] [--json]    the models and reasoning efforts a backend
-#                                                 offers (default: the effective backend)
+#   config.sh models [scope] [--backend NAME] [--json] [--no-save]
+#                         refresh models and efforts; save beside the selected config
 #
 # Scope (which file, and where inside it):
 #   --project                ./.review-loop.json, shared by every provider      (default)
@@ -82,7 +82,7 @@ usage() { sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 CMD="${1:-}"; [ $# -gt 0 ] && shift
-SCOPE=project JSON=0 YES=0 DRY=0 MODE=shared PNAME="" EXPLICIT=0 MODELS_BACKEND=""
+SCOPE=project JSON=0 YES=0 DRY=0 MODE=shared PNAME="" EXPLICIT=0 MODELS_BACKEND="" SAVE_MODELS=1
 ARGS=()
 # Provider names are validated as whole strings by rl_valid_provider_name (lib.sh):
 # a letter or digit followed by letters, digits, "_" or "-". Nothing starting with
@@ -113,6 +113,7 @@ while [ $# -gt 0 ]; do
     --provider-file=*) MODE=file; EXPLICIT=1; PNAME="${1#*=}"; shift ;;
     --provider-file) MODE=file; EXPLICIT=1; if PNAME=$(take_name "$1" "${2:-}"); then shift 2; else PNAME=""; shift; fi ;;
     --json) JSON=1; shift ;;
+    --no-save) SAVE_MODELS=0; shift ;;
     --backend) MODELS_BACKEND="${2:-}"; shift 2 ;;
     --backend=*) MODELS_BACKEND="${1#*=}"; shift ;;
     --yes|-y) YES=1; shift ;;
@@ -283,12 +284,24 @@ cmd_keys() {
 }
 
 cmd_models() {
-  local be cat
+  local be cat file tmp
   be="${MODELS_BACKEND:-$(rl_resolve_config | jq -r .backend)}"
   printf '%s' "$be" | grep -qE '^[a-z0-9_-]+$' && [ -f "$RL_BACKENDS_DIR/$be.sh" ] \
     || rl_die "unknown backend '$be' (available: $(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | tr '\n' ' ' | sed 's/ $//'))"
   cat=$(rl_backend_models "$be")
+  if [ "$SAVE_MODELS" = "1" ]; then
+    if [ "$EXPLICIT" = "1" ]; then file=$(rl_model_catalog_path "$be" "$TARGET"); else file=$(rl_model_catalog_path "$be"); fi
+    [ ! -d "$file" ] || rl_die "cannot save model catalog: $file is a directory"
+    mkdir -p "$(dirname "$file")" || rl_die "cannot create model catalog directory"
+    tmp=$(mktemp "$file.tmp.XXXXXX") || rl_die "cannot create temporary model catalog at $file"
+    cat=$(jq -c --arg b "$be" --arg f "$file" --arg t "$(rl_now)" '. + {catalog_version: 1, backend: $b, catalog_file: $f, saved_at: $t}' <<< "$cat")
+    if ! { printf '%s\n' "$cat" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$file"; }; then
+      rm -f "$tmp"
+      rl_die "cannot save model catalog at $file"
+    fi
+  fi
   if [ "$JSON" = "1" ]; then printf '%s\n' "$cat"; return; fi
+  [ "$SAVE_MODELS" != "1" ] || echo "saved catalog: $file"
   echo "models for backend $be$(jq -r 'if .source then " (from \(.source))" else "" end' <<< "$cat"):"
   if [ "$(jq '.models | length' <<< "$cat")" -eq 0 ]; then
     echo "  (no list available; any model name is passed through)"

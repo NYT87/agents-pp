@@ -49,7 +49,14 @@ pointer() { cat "$1/.claude/review-loop.active" 2>/dev/null; }
 st() { jq -r ".$2" "$1/state.json"; }   # st LOOP_DIR KEY
 start() { (cd "$1" && shift && bash "$S/start.sh" "$@" 2>&1); }
 review() { (cd "$1" && bash "$S/review.sh" 2>&1); }
-coder() { printf '# summary\n' > "$1/round-$(printf '%02d' "$2")-coder.md"; }
+coder() {
+  local history
+  history=$(bash -c '. "$1"; rl_review_history "$2" "$3"' _ "$S/lib.sh" "$1" "$2")
+  {
+    printf '# summary\n\n## Responses to the previous review\n\n| ID | Status | Note |\n|----|--------|------|\n'
+    jq -r '.required_coder_ids[] | "| \(.) | fixed | Addressed and verified. |"' <<< "$history"
+  } > "$1/round-$(printf '%02d' "$2")-coder.md"
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "no active loop"
@@ -442,6 +449,8 @@ assert_contains "downgrade notice" "treating as changes_requested" "$OUT"
 assert_contains "downgraded frontmatter" "verdict: changes_requested" "$(head -3 "$L/round-01-review.md")"
 assert_eq "downgrade advances round" "2" "$(st "$L" round)"
 coder "$L" 2; verdicts prose
+# Existing loops retain the tolerant legacy format on upgrade.
+jq 'del(.protocol_version)' "$L/state.json" > "$L/state.tmp"; mv "$L/state.tmp" "$L/state.json"
 assert_contains "prose output approved" "APPROVED" "$(review "$R")"
 
 section "git edge cases"
@@ -1573,9 +1582,30 @@ if command -v python3 > /dev/null 2>&1 && command -v curl > /dev/null 2>&1; then
   assert_contains "serve: set applied through config.sh" "Updated $R/.review-loop.json" "$OUT"
   assert_eq "serve: file updated" "4" "$(jq .max_rounds "$R/.review-loop.json")"
   assert_eq "serve: boolean coerced" "true" "$(jq .usage "$R/.review-loop.json")"
-  OUT=$(post '{"scope":"project","mode":"section","provider":"codex","set":{"backend":"claude"}}')
+  assert_eq "serve: save returns effective settings for auto-save reconciliation" "4" "$(sed '$d' <<< "$OUT" | jq .show.effective.max_rounds)"
+  assert_eq "serve: shared save refreshes launch defaults" "4" "$(sed '$d' <<< "$OUT" | jq .launch_effective.max_rounds)"
+  models_post() { curl -s -w '\n%{http_code}' -X POST "http://127.0.0.1:$PORT/api/models" -H "X-RL-Token: ${2:-$TOKEN}" -H 'Content-Type: application/json' -d "$1"; }
+  assert_contains "models refresh: bad token rejected" "403" "$(models_post '{"backend":"claude"}' nope)"
+  assert_contains "models refresh: backend traversal rejected" "400" "$(models_post '{"backend":"../claude"}')"
+  assert_contains "models refresh: bad scope rejected" "400" "$(models_post '{"backend":"claude","scope":"system"}')"
+  assert_contains "models refresh: provider needs scope" "400" "$(models_post '{"backend":"claude","provider":"codex"}')"
+  assert_contains "models refresh: provider traversal rejected" "400" "$(models_post '{"backend":"claude","scope":"project","mode":"file","provider":"../x"}')"
+  OUT=$(models_post '{"backend":"claude","scope":"project","mode":"file","provider":"codex"}')
+  assert_contains "models refresh: refresh succeeds" '"ok": true' "$OUT"
+  assert_file "models refresh: saved beside selected provider config" "$R/.codex/review-loop-models.claude.json"
+  assert_eq "models refresh: JSON returns saved location" "$R/.codex/review-loop-models.claude.json" "$(sed '$d' <<< "$OUT" | jq -r .catalog.catalog_file)"
+  assert_no_file "models refresh: does not create the config itself" "$R/.codex/review-loop.json"
+  OUT=$(models_post '{"backend":"claude"}')
+  assert_file "models refresh: default saves beside active config" "$R/review-loop-models.claude.json"
+  PAGE=$(curl -s "http://127.0.0.1:$PORT/")
+  D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' <<< "$PAGE")
+  assert_eq "models refresh: next page reads the saved catalog" "$R/review-loop-models.claude.json" "$(jq -r .config.models.claude.catalog_file <<< "$D")"
+  OUT=$(post '{"scope":"project","mode":"section","provider":"codex","set":{"backend":"claude","max_rounds":"7"}}')
   assert_contains "serve: section write" "(providers.codex)" "$OUT"
   assert_eq "serve: section stored" '"claude"' "$(jq .providers.codex.backend "$R/.review-loop.json")"
+  assert_eq "serve: edited provider keeps its own effective settings" "codex 7" "$(sed '$d' <<< "$OUT" | jq -r '[.show.provider, (.show.effective.max_rounds | tostring)] | join(" ")')"
+  assert_eq "serve: another provider cannot replace launch defaults" "4" "$(sed '$d' <<< "$OUT" | jq .launch_effective.max_rounds)"
+  post '{"scope":"project","mode":"section","provider":"codex","unset":["max_rounds"]}' > /dev/null
   OUT=$(post '{"scope":"project","mode":"shared","unset":["usage"]}')
   assert_eq "serve: unset applied" "null" "$(jq .usage "$R/.review-loop.json")"
   assert_contains "serve: validation error surfaces with 422" "positive integer (got '0')" "$(post '{"set":{"max_rounds":"0"}}')"
@@ -1694,8 +1724,8 @@ OUT=$(cd "$R" && bash "$C" models)
 assert_contains "models: text lists the models" "fake-smart" "$OUT"
 assert_contains "models: text marks the default" "fake-fast" "$OUT"
 assert_contains "models: text lists the efforts" "efforts: low, high, max" "$OUT"
-assert_eq "models --backend claude: aliases and full names" "true" "$(bash "$C" models --backend claude --json | jq '(.models | map(.id)) as $m | ($m | index("opus")) != null and ($m | index("claude-opus-5-5")) != null')"
-assert_eq "models --backend claude: efforts up to max" '["low","medium","high","xhigh","max"]' "$(bash "$C" models --backend claude --json | jq -c .efforts)"
+assert_eq "models --backend claude: aliases and full names" "true" "$(bash "$C" models --backend claude --json --no-save | jq '(.models | map(.id)) as $m | ($m | index("opus")) != null and ($m | index("claude-opus-5-5")) != null')"
+assert_eq "models --backend claude: efforts up to max" '["low","medium","high","xhigh","max"]' "$(bash "$C" models --backend claude --json --no-save | jq -c .efforts)"
 assert_eq "models: unknown backend refused" "1" "$(bash "$C" models --backend nope > /dev/null 2>&1; echo $?)"
 assert_contains "keys lists effort" "effort" "$(bash "$C" keys)"
 # codex: from Codex's own cache and config, listed models in priority order
@@ -1737,8 +1767,8 @@ assert_contains "an unlisted model still refuses a level outside the backend's" 
 # a listed model with an EMPTY level list has unknown capabilities: nothing is
 # refused for it (no fallback to the backend-wide list)
 assert_eq "listed model with no levels: any effort accepted" "0" "$(cd "$R" && bash "$C" set model=fake-mystery effort=ultra > /dev/null 2>&1; echo $?)"
-assert_eq "rl_effort_choices: a listed model's empty list is kept" "[]" "$(bash -c '. "$1"; rl_effort_choices "$2" fake-mystery' _ "$S/lib.sh" "$(bash "$C" models --json)")"
-assert_eq "rl_effort_choices: an unlisted model gets the backend-wide list" '["low","high","max"]' "$(bash -c '. "$1"; rl_effort_choices "$2" nope' _ "$S/lib.sh" "$(bash "$C" models --json)")"
+assert_eq "rl_effort_choices: a listed model's empty list is kept" "[]" "$(bash -c '. "$1"; rl_effort_choices "$2" fake-mystery' _ "$S/lib.sh" "$(bash "$C" models --json --no-save)")"
+assert_eq "rl_effort_choices: an unlisted model gets the backend-wide list" '["low","high","max"]' "$(bash -c '. "$1"; rl_effort_choices "$2" nope' _ "$S/lib.sh" "$(bash "$C" models --json --no-save)")"
 assert_eq "rl_check_effort: unknown capabilities accept anything" "0" "$(bash -c '. "$1"; rl_check_effort fake fake-mystery ultra' _ "$S/lib.sh" > /dev/null; echo $?)"
 assert_contains "rl_check_effort: a listed model with levels refuses others" "unknown effort 'max' for model fake-fast (backend fake; available: low high)" "$(bash -c '. "$1"; rl_check_effort fake fake-fast max' _ "$S/lib.sh" || true)"
 # no list known (codex without its cache here): nothing is refused
@@ -1825,6 +1855,21 @@ assert_eq "--with-user-config: the default model is marked" "gpt-x" "$(jq -r '.c
 assert_eq "--with-user-config: not flagged as redacted" "null" "$(jq '.config.models.codex.redacted_defaults' <<< "$D")"
 if command -v node > /dev/null 2>&1; then
   DERIVE="$TMP/derive-models.js"
+  if OUT=$(node "$HERE/test_dashboard_models.js" "$S/../templates/dashboard.html" 2>&1); then
+    pass "dashboard model/effort dropdowns and catalog action buttons"
+  else
+    fail "dashboard model/effort dropdowns and catalog action buttons" "$OUT"
+  fi
+  if OUT=$(node "$HERE/test_dashboard_autosave.js" "$S/../templates/dashboard.html" 2>&1); then
+    pass "dashboard automatic configuration saves and recovery"
+  else
+    fail "dashboard automatic configuration saves and recovery" "$OUT"
+  fi
+  if OUT=$(node "$HERE/test_dashboard_a11y.js" "$S/../templates/dashboard.html" 2>&1); then
+    pass "dashboard keyboard and screen-reader wiring"
+  else
+    fail "dashboard keyboard and screen-reader wiring" "$OUT"
+  fi
   sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
   MOUT=$(node -e '
     const RL = require(process.argv[1]);
@@ -2272,6 +2317,46 @@ assert_not_contains "no extra section without config" "Additional instructions" 
 assert_not_contains "default brief leaves no placeholder" "{{" "$(cat "$L/coder-brief.md")"
 assert_contains "default templates unchanged for the reviewer" "You are an independent, senior code reviewer." "$(cat "$L/round-01-prompt.md")"
 
+section "model catalogs beside active configuration"
+R=$(new_repo catalog_paths)
+J=$(cd "$R" && bash "$C" models --backend claude --json --no-save)
+assert_no_file "catalog: --no-save stays read-only" "$R/review-loop-models.claude.json"
+(cd "$R" && bash "$C" set --provider-file claude max_rounds=3 > /dev/null)
+J=$(cd "$R" && bash "$C" models --backend claude --json)
+assert_eq "catalog: default follows active provider config" "$R/.claude/review-loop-models.claude.json" "$(jq -r .catalog_file <<< "$J")"
+assert_file "catalog: default writes a file" "$R/.claude/review-loop-models.claude.json"
+assert_no_file "catalog: default avoids the project root with provider config" "$R/review-loop-models.claude.json"
+J=$(cd "$R" && bash "$C" models --backend claude --project --json)
+assert_eq "catalog: explicit project shared scope wins" "$R/review-loop-models.claude.json" "$(jq -r .catalog_file <<< "$J")"
+J=$(cd "$R" && XDG_CONFIG_HOME="$TMP/catalog-user" bash "$C" models --backend claude --user --json)
+assert_eq "catalog: user shared honors XDG_CONFIG_HOME" "$TMP/catalog-user/review-loop/review-loop-models.claude.json" "$(jq -r .catalog_file <<< "$J")"
+assert_no_file "catalog: refreshing never creates config.json" "$TMP/catalog-user/review-loop/config.json"
+# Dashboard reads the saved file rather than rebuilding it from a CLI catalog.
+jq '.models[0].label = "Saved catalog label"' "$R/.claude/review-loop-models.claude.json" > "$TMP/catalog-edited.json"
+mv "$TMP/catalog-edited.json" "$R/.claude/review-loop-models.claude.json"
+(cd "$R" && bash "$S/dashboard.sh" --no-open --out page.html > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/page.html")
+assert_eq "catalog: page reads highest-precedence saved catalog" "Saved catalog label" "$(jq -r '.config.models.claude.models[0].label' <<< "$D")"
+assert_eq "catalog: shareable page still redacts saved defaults" "null" "$(jq .config.models.claude.default_model <<< "$D")"
+printf '{broken' > "$R/.claude/review-loop-models.claude.json"
+(cd "$R" && bash "$S/dashboard.sh" --no-open --out page.html > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/page.html")
+assert_eq "catalog: corrupt cache falls back to another valid config catalog" "$R/review-loop-models.claude.json" "$(jq -r .config.models.claude.catalog_file <<< "$D")"
+mkdir "$R/review-loop-models.codex.json"
+OUT=$(cd "$R" && bash "$C" models --backend codex --project 2>&1); RC=$?
+assert_eq "catalog: directory at destination fails" "1" "$RC"
+assert_contains "catalog: directory failure explains the path" "is a directory" "$OUT"
+if command -v node > /dev/null 2>&1; then
+  if OUT=$(node "$HERE/test_dashboard_autosave.js" "$S/../templates/dashboard.html" 2>&1); then
+    pass "auto-save keeps newer edits and safely merges selected files"
+  else fail "auto-save keeps newer edits and safely merges selected files" "$OUT"; fi
+fi
+
 echo
+if OUT=$(bash "$HERE/test_protocol.sh" 2>&1); then
+  pass "strict review protocol, coder responses, retries and legacy compatibility"
+else
+  fail "strict review protocol, coder responses, retries and legacy compatibility" "$OUT"
+fi
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

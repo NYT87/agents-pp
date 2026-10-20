@@ -1,5 +1,10 @@
 Your final message is the review. It must follow this format exactly (Markdown):
 
+New loops validate this protocol before installing your review. Use unique,
+consecutive new IDs across Comments and Optional, starting at C1 for this round.
+Include each required finding field exactly once, with a non-empty value and a
+positive integer line number. Do not wrap the review in a code fence.
+
 ## Previous comments
 
 Only from round 2 on. One line per comment ID from EVERY earlier review, with one
@@ -39,3 +44,5 @@ VERDICT: approved
 The last line must be exactly `VERDICT: approved` or `VERDICT: changes_requested`.
 Write `approved` ONLY when there is no blocking comment at all (no `blocking: yes`,
 no `unresolved`, no `declined-rejected`). Otherwise write `changes_requested`.
+`changes_requested` must have at least one blocking finding or an earlier ID
+marked `unresolved` or `declined-rejected`; optional findings alone do not justify it.

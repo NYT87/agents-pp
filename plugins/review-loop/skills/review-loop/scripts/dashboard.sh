@@ -120,7 +120,7 @@ bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/n
 echo '{}' > "$WORK/models.json"
 while IFS= read -r b; do
   [ -n "$b" ] || continue
-  m=$(rl_backend_models "$b")
+  m=$(rl_model_catalog "$b")
   jq -c --arg b "$b" --argjson m "$m" '. + {($b): $m}' "$WORK/models.json" > "$WORK/models.tmp" && mv "$WORK/models.tmp" "$WORK/models.json"
 done < <(jq -r '.backends[]?' "$WORK/config-keys.json")
 # Every existing per-provider file (any provider), so the page can merge edits
@@ -264,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path not in ("/api/config", "/api/start"):
+        if self.path not in ("/api/config", "/api/start", "/api/models"):
             self._json(404, {"ok": False, "output": "not found"}); return
         if self.headers.get("X-RL-Token") != TOKEN:
             self._json(403, {"ok": False, "output": "bad token (reload the page)"}); return
@@ -277,7 +277,38 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"ok": False, "output": "bad payload"}); return
         if self.path == "/api/start":
             self._start(req); return
+        if self.path == "/api/models":
+            self._models(req); return
         self._config(req)
+
+    def _models(self, req):
+        backend = req.get("backend")
+        if not isinstance(backend, str) or not NAME_RE.fullmatch(backend) or not os.path.isfile(os.path.join(BACKENDS_DIR, backend + ".sh")):
+            self._json(400, {"ok": False, "output": "bad backend"}); return
+        flags = []
+        # Omitted scope uses the active config folder; an explicit selection
+        # uses the same scope/provider rules as the configuration writer.
+        if "scope" in req:
+            scope, mode = req.get("scope"), req.get("mode", "shared")
+            if scope not in ("project", "user") or mode not in ("shared", "section", "file"):
+                self._json(400, {"ok": False, "output": "bad scope or mode"}); return
+            flags.append("--" + scope)
+            if mode != "shared":
+                provider = req.get("provider")
+                if not isinstance(provider, str) or not NAME_RE.fullmatch(provider) or provider == "none":
+                    self._json(400, {"ok": False, "output": "bad provider name"}); return
+                flags.append(("--provider=" if mode == "section" else "--provider-file=") + provider)
+        elif "mode" in req or "provider" in req:
+            self._json(400, {"ok": False, "output": "scope required with mode or provider"}); return
+        r = subprocess.run(["bash", os.path.join(SCRIPTS, "config.sh"), "models", "--backend", backend, "--json"] + flags,
+                           cwd=ROOT, capture_output=True, text=True)
+        if r.returncode:
+            self._json(422, {"ok": False, "output": r.stderr or r.stdout}); return
+        try:
+            catalog = json.loads(r.stdout)
+        except ValueError:
+            self._json(422, {"ok": False, "output": "invalid catalog output"}); return
+        self._json(200, {"ok": True, "catalog": catalog})
 
     # Start a loop: start.sh with an argv built strictly from validated fields
     # (no shell); the task goes after "--" so it can never be read as a flag.
@@ -378,7 +409,27 @@ class Handler(BaseHTTPRequestHandler):
             outputs.append(r.stdout + r.stderr); ok = ok and r.returncode == 0
         if not sets and not unsets:
             outputs.append("nothing to change")
-        self._json(200 if ok else 422, {"ok": ok, "output": "".join(outputs)})
+        show, launch_show = None, None
+        if ok:
+            r = subprocess.run(["bash", cfg, "show", "--json"] + flags, cwd=ROOT, capture_output=True, text=True)
+            try:
+                show = json.loads(r.stdout) if r.returncode == 0 else None
+            except ValueError:
+                pass
+            launch_show = show
+            if show is not None and mode != "shared":
+                # Launches use the server's provider, regardless of whose
+                # settings the Configuration page is currently editing.
+                r = subprocess.run(["bash", cfg, "show", "--json"], cwd=ROOT, capture_output=True, text=True)
+                try:
+                    launch_show = json.loads(r.stdout) if r.returncode == 0 else None
+                except ValueError:
+                    launch_show = None
+            if show is None or launch_show is None:
+                ok = False
+                outputs.append("Saved, but could not reload configuration; retry to reconcile the page.")
+        self._json(200 if ok else 422, {"ok": ok, "output": "".join(outputs), "show": show,
+                                      "launch_effective": launch_show.get("effective") if launch_show else None})
 
 import signal
 signal.signal(signal.SIGTERM, lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))

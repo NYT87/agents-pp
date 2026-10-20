@@ -53,7 +53,10 @@ When the implementation is complete:
 1. Write `<loop dir>/round-NN-coder.md` following
    `${CLAUDE_SKILL_DIR}/templates/coder-summary.md`: what you did, files changed,
    how you verified it. From round 2 on, include the "Responses to the previous
-   review" table with one row per comment ID (`fixed`, or `declined` with a reason).
+   review" table with one row per new finding in the previous review (including
+   Optional items) and per older unresolved or declined-rejected ID. Use `fixed`
+   or `declined`, with a non-empty explanation, and do not duplicate IDs. New
+   loops reject invalid responses before invoking the reviewer.
 2. Run the reviewer (give the Bash tool a 600000 ms timeout; reviews take minutes):
 
    ```bash

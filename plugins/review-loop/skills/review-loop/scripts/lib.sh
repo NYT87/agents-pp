@@ -368,6 +368,37 @@ rl_backend_models() {
   fi
 }
 
+# Catalogs live beside configuration files. With no explicit target, use the
+# highest-precedence existing config file, or the project shared location.
+rl_model_catalog_path() { # BACKEND [CONFIG_FILE]
+  local target="${2:-}" label path kind
+  if [ -z "$target" ]; then
+    target="$PWD/.$RL_CONFIG_NAME"
+    while IFS=$'\t' read -r label path kind; do
+      [ ! -f "$path" ] || target="$path"
+    done < <(rl_config_files)
+  fi
+  printf '%s/review-loop-models.%s.json\n' "$(dirname "$target")" "$1"
+}
+
+rl_model_catalog() { # BACKEND -> saved catalog by config precedence, else live
+  local label path kind file found=""
+  while IFS=$'\t' read -r label path kind; do
+    file=$(rl_model_catalog_path "$1" "$path")
+    if [ -f "$file" ] && jq -e --arg b "$1" '
+      .catalog_version == 1 and .backend == $b
+      and (.models | type == "array") and (.efforts | type == "array")
+      and (.efforts | all(.[]; type == "string"))
+      and (.models | all(.[]; type == "object" and (.id | type == "string")
+        and (.label == null or (.label | type == "string"))
+        and (.efforts == null or ((.efforts | type == "array") and (.efforts | all(.[]; type == "string"))))))
+      and ([.default_model, .default_effort, .note] | all(.[]; . == null or type == "string"))' "$file" > /dev/null 2>&1; then
+      found="$file"
+    fi
+  done < <(rl_config_files)
+  if [ -n "$found" ]; then jq -c . "$found"; else rl_backend_models "$1"; fi
+}
+
 # rl_effort_choices CATALOG MODEL -> JSON array: the listed MODEL's own efforts
 # (its empty list included: that model's capabilities are unknown, anything
 # goes), else the backend-wide list for a model that is not listed.
@@ -493,7 +524,120 @@ rl_review_body() {
   awk 'NR == 1 { if ($0 == "---") { fm = 1; next } } fm { if ($0 == "---") fm = 0; next } { print }' "$1"
 }
 
-# rl_validate_review FILE VERDICT -> prints a problem description and returns 1
+# Parse the protocol once for validation, history and blocking reports. Fenced
+# examples are not findings. Field pairs are retained so duplicates cannot be
+# silently overwritten by a JSON object conversion.
+rl_review_data() { # FILE -> {sections, findings, dispositions, errors}
+  rl_review_body "$1" | awk '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
+    function emit(t,a,b,c) { gsub(/\t/, " ", a); gsub(/\t/, " ", b); gsub(/\t/, " ", c); print t "\t" a "\t" b "\t" c }
+    { line=trim($0); if (line != "") last=line }
+    line ~ /^```/ || line ~ /^~~~/ {
+      tag=substr(line,1,3); if (fence == "") fence=tag; else if (fence == tag) fence=""; next
+    }
+    fence != "" { next }
+    line ~ /^##[ \t]+/ { section=tolower(line); sub(/^##[ \t]+/, "", section); active=0; emit("S",section); next }
+    line ~ /^###[ \t]+R/ {
+      if (line !~ /^###[ \t]+R[1-9][0-9]*-C[1-9][0-9]*$/) { emit("E","malformed finding heading: " line); active=0; next }
+      id=line; sub(/^###[ \t]+/, "", id); active=1; emit("F",id,section); next
+    }
+    line ~ /^-[ \t]+R[^ \t:]*[ \t]*:/ {
+      id=line; sub(/^-[ \t]+/, "", id); sub(/[ \t]*:.*/, "", id)
+      status=line; sub(/^[^:]*:[ \t]*/, "", status); sub(/[ \t].*/, "", status)
+      if (section != "previous comments") emit("E","previous-comment status outside Previous comments: " id)
+      emit("D",id,status); next
+    }
+    line ~ /^-[ \t]+(severity|blocking|file|line|description|suggested fix)[ \t]*:/ {
+      key=line; sub(/^-[ \t]+/, "", key); sub(/[ \t]*:.*/, "", key)
+      value=line; sub(/^[^:]*:[ \t]*/, "", value)
+      if (!active) emit("E","finding field without a finding heading: " key); else emit("K",key,value)
+    }
+    END { if (fence != "") emit("E","unclosed code fence"); emit("V",last) }
+  ' | jq -Rn '
+    reduce inputs as $line ({sections: [], findings: [], dispositions: [], errors: [], last_line: ""};
+      ($line | split("\t")) as $p |
+      if $p[0] == "S" then .sections += [$p[1]]
+      elif $p[0] == "F" then .findings += [{id: $p[1], section: $p[2], fields: []}]
+      elif $p[0] == "K" then .findings[-1].fields += [[$p[1], $p[2]]]
+      elif $p[0] == "D" then .dispositions += [{id: $p[1], status: $p[2]}]
+      elif $p[0] == "E" then .errors += [$p[1]]
+      elif $p[0] == "V" then .last_line = $p[1] else . end)'
+}
+
+# Installed history is authoritative. A missing file must not erase a blocker.
+rl_review_history() { # LOOP_DIR CURRENT_ROUND -> JSON; errors on stdout
+  local r file data history='{"ids":[],"statuses":{},"latest_ids":[]}'
+  for ((r = 1; r < $2; r++)); do
+    file="$1/round-$(rl_round_nn "$r")-review.md"
+    [ -s "$file" ] || { echo "missing historical review: $file"; return 1; }
+    data=$(rl_review_data "$file") || return 1
+    [ "$(jq '.errors | length' <<< "$data")" = "0" ] || { echo "malformed historical review: $file"; return 1; }
+    history=$(jq -c --argjson d "$data" '
+      .latest_ids = [$d.findings[].id]
+      | reduce $d.findings[] as $f (.; .ids += [$f.id]
+          | .statuses[$f.id] = (if any($f.fields[]; . == ["blocking","yes"]) then "unresolved" else "optional" end))
+      | reduce $d.dispositions[] as $s (.; .statuses[$s.id] = $s.status)' <<< "$history") || return 1
+  done
+  jq -c '.open_ids = [.statuses | to_entries[] | select(.value == "unresolved" or .value == "declined-rejected") | .key]
+    | .required_coder_ids = ((.latest_ids + .open_ids) | unique)' <<< "$history"
+}
+
+rl_validate_review_protocol() { # FILE VERDICT ROUND HISTORY_JSON
+  local data problem
+  data=$(rl_review_data "$1") || { echo "cannot parse review protocol"; return 1; }
+  problem=$(jq -r --argjson r "$3" --argjson h "$4" --arg verdict "$2" '
+    def field($k): [.fields[] | select(.[0] == $k) | .[1]][0] // "";
+    . as $d | [
+      .errors[],
+      (select(.last_line != ("VERDICT: " + $verdict)) | "last non-empty line must be VERDICT: \($verdict)"),
+      (("comments", "assessment") as $s | select(([$d.sections[] | select(. == $s)] | length) != 1) | "expected exactly one ## \($s) section"),
+      (("previous comments", "optional") as $s | select(([$d.sections[] | select(. == $s)] | length) > 1) | "duplicate ## \($s) section"),
+      ($d.findings | group_by(.id)[] | select(length > 1) | "duplicate finding ID: \(.[0].id)"),
+      ($d.findings | to_entries[] | select(.value.id != ("R\($r)-C\(.key + 1)")) | "expected finding R\($r)-C\(.key + 1), got \(.value.id)"),
+      ($d.findings[] | select(.section != "comments" and .section != "optional") | "finding \(.id) must be in Comments or Optional"),
+      ($d.findings[] | . as $f | .fields | group_by(.[0])[] | select(length > 1) | "duplicate field \(.[0][0]) in \($f.id)"),
+      ($d.findings[] | . as $f | ("severity","blocking","file","line","description","suggested fix") as $k | select(($f | field($k)) == "") | "missing \($k) in \($f.id)"),
+      ($d.findings[] | select((field("severity") | IN("critical","high","medium","low")) | not) | "invalid severity in \(.id)"),
+      ($d.findings[] | select((field("blocking") | IN("yes","no")) | not) | "invalid blocking flag in \(.id)"),
+      ($d.findings[] | select((field("line") | test("^[1-9][0-9]*$")) | not) | "invalid line in \(.id): use a positive integer"),
+      ($d.findings[] | select(.section == "optional" and field("blocking") != "no") | "Optional finding \(.id) must have blocking: no"),
+      ($d.dispositions | group_by(.id)[] | select(length > 1) | "duplicate previous-comment ID: \(.[0].id)"),
+      ($d.dispositions[] | .id as $id | select(($h.ids | index($id)) == null) | "unknown previous-comment ID: \($id)"),
+      ($h.ids[] | . as $id | select(([$d.dispositions[].id] | index($id)) == null) | "missing previous-comment ID: \($id)"),
+      ($d.dispositions[] | select((.status | IN("resolved","unresolved","declined-accepted","declined-rejected")) | not) | "invalid status for \(.id): \(.status)"),
+      (select(($h.ids | length) > 0 and ([$d.sections[] | select(. == "previous comments")] | length) != 1) | "expected exactly one ## Previous comments section"),
+      (select($verdict == "changes_requested" and
+        ([$d.findings[] | select(field("blocking") == "yes")] + [$d.dispositions[] | select(.status == "unresolved" or .status == "declined-rejected")] | length) == 0)
+        | "changes_requested requires a blocking finding or unresolved previous comment")
+    ] | .[0] // empty' <<< "$data") || { echo "cannot validate review protocol"; return 1; }
+  [ -z "$problem" ] || { echo "$problem"; return 1; }
+}
+
+rl_validate_coder() { # FILE HISTORY_JSON
+  local rows problem
+  rows=$(awk '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
+    { line=trim($0) }
+    line ~ /^```/ || line ~ /^~~~/ { tag=substr(line,1,3); if (fence == "") fence=tag; else if (fence == tag) fence=""; next }
+    fence != "" { next }
+    line ~ /^##[ \t]+/ { on=(tolower(line) ~ /^##[ \t]+responses([ \t]|$)/); next }
+    on && line ~ /^\|[ \t]*R/ {
+      sub(/^\|/, "", line); sub(/\|[ \t]*$/, "", line); n=split(line,a,/\|/)
+      id=trim(a[1]); status=trim(a[2]); note=""; for (i=3;i<=n;i++) note=note " " a[i]
+      gsub(/\t/, " ", note); print id "\t" status "\t" trim(note)
+    }' "$1" | jq -Rn '[inputs | split("\t") | {id: .[0], status: .[1], note: .[2]}]') || return 1
+  problem=$(jq -r --argjson h "$2" '
+    . as $rows | [
+      (group_by(.id)[] | select(length > 1) | "duplicate coder response: \(.[0].id)"),
+      (.[] | .id as $id | select(($h.ids | index($id)) == null) | "unknown coder response ID: \($id)"),
+      ($h.required_coder_ids[] | . as $id | select(([$rows[].id] | index($id)) == null) | "missing coder response: \($id)"),
+      (.[] | select(.status != "fixed" and .status != "declined") | "invalid coder response status for \(.id): \(.status)"),
+      (.[] | select(.note == "") | "coder response \(.id) needs a non-empty explanation")
+    ] | .[0] // empty' <<< "$rows") || return 1
+  [ -z "$problem" ] || { echo "$problem"; return 1; }
+}
+
+# rl_validate_review FILE VERDICT [ROUND HISTORY_JSON] -> problem on failure.
 # when the review lacks the documented structure (a Comments section, a
 # non-empty Assessment, and at least one comment or unresolved item when
 # changes are requested). A bare verdict line is not a usable review.
@@ -515,12 +659,17 @@ rl_validate_review() {
       echo "changes were requested but no comment (### R<round>-C<n>) or unresolved item is listed"; return 1
     fi
   fi
+  if [ "$#" -ge 4 ]; then rl_validate_review_protocol "$1" "$2" "$3" "$4"; return; fi
   return 0
 }
 
 # rl_count_blocking FILE -> number of blocking items:
 #   "- blocking: yes" lines + "- R1-C2: unresolved|declined-rejected" lines.
 rl_count_blocking() {
+  if [ "${2:-1}" = "2" ]; then
+    rl_review_data "$1" | jq '[.findings[] | select(any(.fields[]; . == ["blocking","yes"]))] + [.dispositions[] | select(.status == "unresolved" or .status == "declined-rejected")] | length'
+    return
+  fi
   local a b
   a=$(rl_strip_fences "$1" | grep -ciE '^[[:space:]>*`_|-]*blocking[*`_]*[[:space:]]*:[*`_]*[[:space:]]*[*`"'"'"']*yes[*`"'"'"']*[[:space:]|]*$') || a=0
   b=$(rl_strip_fences "$1" | grep -ciE '^[[:space:]>*`_|-]*R[0-9]+-C[0-9]+[*`_]*[[:space:]]*:[*`_]*[[:space:]]*[*`_]*(unresolved|declined-rejected)') || b=0
@@ -529,6 +678,10 @@ rl_count_blocking() {
 
 # rl_blocking_ids FILE -> IDs that are still blocking (one per line).
 rl_blocking_ids() {
+  if [ "${2:-1}" = "2" ]; then
+    rl_review_data "$1" | jq -r '([.findings[] | select(any(.fields[]; . == ["blocking","yes"])) | .id] + [.dispositions[] | select(.status == "unresolved" or .status == "declined-rejected") | .id]) | unique[]'
+    return
+  fi
   rl_strip_fences "$1" | awk '
     /^[[:space:]]*#+[[:space:]]*R[0-9]+-C[0-9]+/ {
       if (id != "" && blocking) print id
@@ -709,7 +862,7 @@ rl_finalize() {
   ids=""
   last_review=$(ls "$dir"/round-*-review.md 2>/dev/null | sort | tail -1 || true)
   if [ -n "$last_review" ]; then
-    ids=$(rl_blocking_ids "$last_review")
+    ids=$(rl_blocking_ids "$last_review" "$(rl_state_get "$dir" protocol_version)")
   fi
   {
     echo "# Review loop summary"

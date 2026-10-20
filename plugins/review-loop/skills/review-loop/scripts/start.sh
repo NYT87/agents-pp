@@ -158,7 +158,7 @@ printf '%s\n' "$TASK" > "$LOOP_DIR/task.md"
 jq -n \
   --arg id "$LOOP_ID" --arg be "$BACKEND" --arg model "$MODEL" --arg effort "$EFFORT" --argjson mr "$MAX_ROUNDS" \
   --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" --argjson prompts "$PROMPTS" \
-  '{loop_id: $id, active: true, phase: "coding", round: 1, max_rounds: $mr,
+  '{loop_id: $id, protocol_version: 2, active: true, phase: "coding", round: 1, max_rounds: $mr,
     backend: $be, model: $model, effort: $effort, base_ref: $base, dir: $dir, root: $root, usage: $usage, prompts: $prompts,
     session_id: (if $sid == "" then null else $sid end), started_at: $t, retries: 0, verdict: null, rounds: [],
     round_started_at: $t, round_started_epoch: $e, paused_s: 0, failed_review_s: 0}' > "$LOOP_DIR/state.json"

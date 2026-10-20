@@ -15,7 +15,10 @@ request changes, for at most {{MAX_ROUNDS}} rounds.
 2. When done, write `{{LOOP_DIR}}/round-NN-coder.md` following
    `{{TEMPLATES}}/coder-summary.md`: what you did, files changed, how you
    verified it. From round 2 on, include the per-comment response table
-   (`fixed`, or `declined` with a reason) for every ID of the previous review.
+   (`fixed`, or `declined`, with an explanation) for every new finding of the
+   previous review, including Optional items, and every older unresolved or
+   declined-rejected ID. Each required ID must appear exactly once; invalid
+   responses are rejected before the reviewer runs.
 3. Run the reviewer: `bash {{SCRIPTS}}/review.sh` (allow several minutes).
 4. Follow what it prints: on CHANGES REQUESTED address every comment by ID and
    repeat from step 2; on APPROVED or when the maximum of rounds is reached,

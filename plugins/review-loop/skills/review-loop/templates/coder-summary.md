@@ -17,7 +17,10 @@
 
 ## Responses to the previous review (round 2 and later only)
 
-One row per comment ID from the previous review. Every ID must appear.
+One row per finding introduced by the previous review, including Optional items,
+plus every older ID still `unresolved` or `declined-rejected`. Each ID must appear
+exactly once. Use only `fixed` or `declined`, and give a non-empty explanation
+for either status. Do not include this example table in round 1.
 
 | ID | Status | Note |
 |----|--------|------|

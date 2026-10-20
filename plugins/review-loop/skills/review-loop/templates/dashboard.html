@@ -7,50 +7,60 @@
 <style>
   :root {
     color-scheme: light;
-    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #6b6a65;
     --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    /* the two voices: s1 = coder, s2 = reviewer; nothing else uses them */
     --s1: #2a78d6; --s2: #eb6834;
+    /* actions (links, current page, primary buttons, focus) are ink, not a voice */
+    --action: #0b0b0b; --on-action: #ffffff;
     --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    /* status colours strong enough for text (the plain ones are for dots) */
+    --good-text: #0a7d0a; --critical-text: #c22f2f;
     --hover: rgba(11,11,11,0.05);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #969490;
       --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
       --s1: #3987e5; --s2: #d95926; --hover: rgba(255,255,255,0.06);
+      --action: #ecebe6; --on-action: #0b0b0b; --good-text: #3cc23c; --critical-text: #ef6b6b;
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #969490;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
     --s1: #3987e5; --s2: #d95926; --hover: rgba(255,255,255,0.06);
+    --action: #ecebe6; --on-action: #0b0b0b; --good-text: #3cc23c; --critical-text: #ef6b6b;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  a { color: var(--s1); }
+  a { color: var(--action); text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+  ::selection { background: var(--axis); color: var(--ink); }
   .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
   header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
   header h1 { font-size: 20px; margin: 0; }
   header .meta { color: var(--muted); font-size: 12px; flex-basis: 100%; order: 3; word-break: break-all; }
   header .spacer { flex: 1; }
   header h1 a { color: inherit; text-decoration: none; }
-  .nav { display: flex; gap: 8px; align-items: center; }
+  .nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .navbtn { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; text-decoration: none; }
   .navbtn:hover { background: var(--hover); }
-  .navbtn.active { background: var(--s1); color: #fff; border-color: transparent; }
-  .view { display: none; } .view.active { display: block; }
-  .crumbs { margin: 0 0 12px; font-size: 13px; } .crumbs a { color: var(--ink-2); text-decoration: none; } .crumbs a:hover { color: var(--s1); }
+  .navbtn.active { background: var(--action); color: var(--on-action); border-color: transparent; }
+  .view { display: none; } .view.active { display: block; } .view:focus { outline: none; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .crumbs { margin: 0 0 12px; font-size: 13px; } .crumbs a { color: var(--ink-2); text-decoration: none; } .crumbs a:hover { color: var(--ink); text-decoration: underline; }
   button, select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
   button:hover, select:hover { background: var(--hover); }
   .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px; font-size: 13px; color: var(--ink-2); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 12px; margin-bottom: 20px; }
   .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
   .tile .label { color: var(--muted); font-size: 12px; }
   .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
   .tile .sub { color: var(--ink-2); font-size: 12px; }
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 12px; margin-bottom: 20px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
   .card h2 { font-size: 14px; margin: 0 0 4px; }
   .card .hint { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
@@ -71,12 +81,14 @@
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: var(--hover); }
   tbody tr.selected { background: var(--hover); outline: 1px solid var(--border); }
+  td.when { white-space: nowrap; }
   .task { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task a { color: inherit; text-decoration: none; } .task a:hover, .task a:focus-visible { text-decoration: underline; }
   .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
   .chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .chip.good i { background: var(--good); } .chip.serious i { background: var(--serious); }
   .chip.critical i { background: var(--critical); } .chip.warning i { background: var(--warning); }
-  .chip.active i { background: var(--s1); } .chip.neutral i { background: var(--muted); }
+  .chip.active i { background: var(--ink-2); } .chip.neutral i { background: var(--muted); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   #tooltip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); display: none; z-index: 10; max-width: 320px; }
   /* detail */
@@ -84,14 +96,14 @@
   .detail-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 6px; }
   .detail-head h2 { margin: 0; font-size: 16px; }
   .kv { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; margin-bottom: 12px; }
-  .kv b { color: var(--ink); font-weight: 500; }
+  .kv b { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
   .round { border-top: 1px solid var(--grid); padding-top: 12px; margin-top: 12px; }
   .round h3 { font-size: 14px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px; }
   .doc { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; overflow: auto; max-height: 520px; }
   .doc .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
-  .md h1, .md h2, .md h3, .md h4 { font-size: 13px; margin: 12px 0 4px; }
-  .md h1 { font-size: 15px; } .md h2 { font-size: 14px; }
+  .md .md-h1, .md .md-h2, .md .md-h3, .md .md-h4 { font-size: 13px; margin: 12px 0 4px; }
+  .md .md-h1 { font-size: 16px; } .md .md-h2 { font-size: 14px; }
   .md p { margin: 6px 0; } .md ul, .md ol { margin: 4px 0 6px; padding-left: 20px; }
   .md li { margin: 1px 0; }
   .md pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
@@ -106,39 +118,49 @@
   .usage-table { margin-top: 10px; }
   /* configuration panel */
   .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px 18px; margin: 10px 0; }
-  .cfg-row { display: grid; grid-template-columns: 1fr; gap: 3px; }
+  .cfg-row { display: grid; grid-template-columns: 1fr; gap: 3px; align-content: start; }
   .cfg-row label { font-size: 13px; }
   .cfg-row .src { color: var(--muted); font-size: 11px; }
   .cfg-row input[type=text], .cfg-row input[type=number], .cfg-row select { width: 100%; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
-  .cfg-row.changed label { color: var(--s1); font-weight: 600; }
-  .cfg-row.removed label { color: var(--critical); text-decoration: line-through; }
-  .cfg-row .err { color: var(--critical); }
+  .cfg-row.changed label { color: var(--ink); font-weight: 600; }
+  .cfg-row.changed label::after { content: " · edited"; font-weight: 400; color: var(--muted); }
+  .cfg-row.removed label { color: var(--critical-text); text-decoration: line-through; }
+  .cfg-row .err { color: var(--critical-text); }
   .cfg-row .tools { float: right; }
-  button.mini { font-size: 11px; padding: 0 6px; margin-left: 4px; }
+  button.mini { font-size: 11px; padding: 0 6px; margin-left: 4px; min-height: 24px; }
   .cfg-row .check { display: flex; align-items: center; gap: 8px; }
   .cfg-scope { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; color: var(--ink-2); margin: 6px 0 4px; }
   .cfg-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
-  .cfg-actions button.primary { background: var(--s1); color: #fff; border-color: transparent; }
+  .cfg-actions button.primary { background: var(--action); color: var(--on-action); border-color: transparent; }
   .cfg-actions button.primary:hover { opacity: .9; }
   .cfg-actions button[disabled] { opacity: .5; cursor: default; }
   pre.cmd { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
   .cfg-out { font-size: 12px; white-space: pre-wrap; margin-top: 8px; color: var(--ink-2); }
-  .cfg-out.ok { color: var(--good); } .cfg-out.err { color: var(--critical); }
+  .cfg-out.ok { color: var(--good-text); } .cfg-out.err { color: var(--critical-text); }
   .cfg-group { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 4px; }
   .cfg-grid.one { grid-template-columns: 1fr; margin: 6px 0 0; }
   .role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin: 8px 0; }
   .role-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
   .role-card h4 { margin: 0; font-size: 14px; }
   .role-status { font-size: 12px; color: var(--ink-2); margin: 4px 0 0; }
-  .role-status .missing { color: var(--critical); font-weight: 600; }
+  .role-status .missing { color: var(--critical-text); font-weight: 600; }
   details.role-tpl { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
   details.role-tpl pre { max-height: 240px; overflow: auto; font-size: 11px; background: var(--page); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; margin: 6px 0 0; }
-  .start-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 14px; margin: 8px 0; }
+  .start-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 10px 14px; margin: 8px 0; }
   #start-task { width: 100%; min-height: 72px; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; resize: vertical; box-sizing: border-box; }
   .start-next { font-size: 13px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
   details.cfg-files { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
   details.cfg-files code { font-size: 11px; }
   @media (max-width: 640px) { .task { max-width: 200px; } th.opt, td.opt { display: none; } }
+  .scroll-x { overflow-x: auto; }
+  /* touch: 44px targets and 16px inputs (smaller text makes iOS zoom in on focus) */
+  @media (pointer: coarse) {
+    button, select, .navbtn, input[type=text], input[type=number] { min-height: 44px; }
+    .navbtn { display: inline-flex; align-items: center; }
+    button.mini { min-height: 36px; padding: 0 10px; }
+    input, select, textarea { font-size: 16px; }
+    input[type=checkbox] { width: 24px; height: 24px; }
+  }
 </style>
 </head>
 <body>
@@ -151,12 +173,13 @@
       <a href="#/" class="navbtn" id="nav-home">Loops</a>
       <a href="#/start" class="navbtn" id="nav-start">Start a loop</a>
       <a href="#/config" class="navbtn" id="nav-config">Configuration</a>
-      <button id="theme" type="button" title="Toggle theme">Theme</button>
+      <button id="theme" type="button">Dark theme</button>
     </nav>
   </header>
 
+  <main>
   <!-- Page 1: stats and the list of loops -->
-  <section class="view" id="view-home">
+  <section class="view" id="view-home" tabindex="-1" aria-label="Loops">
     <div class="filters">
       <label>Outcome <select id="f-outcome"><option value="">all</option></select></label>
       <label>Backend <select id="f-backend"><option value="">all</option></select></label>
@@ -188,7 +211,7 @@
 
     <div class="card">
       <h2>Loops</h2>
-      <div class="hint">Click a row to open the loop's page with its full comment trail.</div>
+      <div class="hint">Open a loop (click its row or task) to see its full comment trail.</div>
       <div style="overflow:auto">
       <table id="loops">
         <thead><tr>
@@ -201,13 +224,13 @@
   </section>
 
   <!-- Page 2: one loop -->
-  <section class="view" id="view-loop">
+  <section class="view" id="view-loop" tabindex="-1" aria-label="Loop">
     <div class="crumbs"><a href="#/">← All loops</a></div>
     <div id="detail"></div>
   </section>
 
   <!-- Page 4: start a loop -->
-  <section class="view" id="view-start">
+  <section class="view" id="view-start" tabindex="-1" aria-label="Start a loop">
     <div class="crumbs"><a href="#/">← All loops</a></div>
     <div class="card" id="card-start">
       <h2>Start a loop</h2>
@@ -216,13 +239,13 @@
       <div class="start-grid" id="start-fields"></div>
       <div class="cfg-actions" id="start-actions"></div>
       <pre class="cmd" id="start-cmd"></pre>
-      <div class="cfg-out" id="start-out"></div>
+      <div class="cfg-out" id="start-out" role="status"></div>
       <div class="start-next" id="start-next" style="display:none"></div>
     </div>
   </section>
 
   <!-- Page 3: configuration -->
-  <section class="view" id="view-config">
+  <section class="view" id="view-config" tabindex="-1" aria-label="Configuration">
     <div class="crumbs"><a href="#/">← All loops</a></div>
     <div class="card" id="card-config">
       <h2>Configuration</h2>
@@ -231,10 +254,11 @@
       <div class="cfg-groups" id="cfg-grid"></div>
       <div class="cfg-actions" id="cfg-actions"></div>
       <pre class="cmd" id="cfg-cmd"></pre>
-      <div class="cfg-out" id="cfg-out"></div>
+      <div class="cfg-out" id="cfg-out" role="status"></div>
       <details class="cfg-files" id="cfg-files"></details>
     </div>
   </section>
+  </main>
 </div>
 <div id="tooltip"></div>
 
@@ -325,6 +349,35 @@ var RL = (function () {
     const m = ((catalog || {}).models || []).find(x => x && x.id === model);
     if (m) return Array.isArray(m.efforts) ? m.efforts : [];
     return Array.isArray((catalog || {}).efforts) ? catalog.efforts : [];
+  }
+  function catalogChoices(catalog, kind, value, model) {
+    const cat = catalog || {}, effectiveModel = model || cat.default_model, listed = (cat.models || []).find(m => m.id === effectiveModel);
+    const def = kind === 'model' ? cat.default_model : (listed && listed.default_effort) || cat.default_effort;
+    const choices = [{ value: '', label: 'backend default' + (def ? ' (' + def + ')' : '') }];
+    if (kind === 'model') {
+      for (const m of cat.models || []) choices.push({ value: m.id, label: (m.label || m.id) + (m.default ? ' (default)' : '') });
+    } else {
+      for (const e of effortChoices(cat, effectiveModel)) choices.push({ value: e, label: e });
+    }
+    if (value && !choices.some(c => c.value === value)) choices.push({ value, label: value + ' (not listed)' });
+    return choices;
+  }
+  function catalogSelection(catalog, model, effort, backendChanged) {
+    if (backendChanged && !(catalog.models || []).some(m => m.id === model)) model = '';
+    const levels = effortChoices(catalog, model || catalog.default_model);
+    if (levels.length && effort && !levels.includes(effort)) effort = '';
+    return { model, effort };
+  }
+  function readCatalog(data, backend) {
+    const cat = data && data.config ? (data.config.models || {})[backend] : data;
+    if (!cat || (cat.backend && cat.backend !== backend) || !Array.isArray(cat.models) || !Array.isArray(cat.efforts)
+        || !cat.efforts.every(e => typeof e === 'string')
+        || !cat.models.every(m => m && typeof m.id === 'string' && m.id.length && (m.label == null || typeof m.label === 'string')
+          && (m.efforts == null || (Array.isArray(m.efforts) && m.efforts.every(e => typeof e === 'string'))))
+        || !['default_model', 'default_effort', 'note'].every(k => cat[k] == null || typeof cat[k] === 'string')) {
+      throw new Error('No valid model catalog for ' + backend + ' in this file.');
+    }
+    return cat;
   }
   // catalog: the chosen backend's model catalog ({models, efforts}) when known,
   // model: the chosen model; efforts are a closed list per model (or backend),
@@ -530,8 +583,27 @@ var RL = (function () {
     const tpl = prompts[role] || '', extra = prompts[role + '_extra'] || '';
     return (tpl || 'default') + (extra ? ' + ' + extra : '');
   }
+  // The link to one loop's page; parseRoute reads it back.
+  const loopHref = id => '#/loop/' + encodeURIComponent(id);
+  // Charts are drawn as SVG for sighted users; screen readers get the same
+  // rows as a table (one column per segment name). The hiding wrapper is a
+  // div: a table never shrinks below its content, so it would widen the page.
+  function chartTable(caption, rows) {
+    const h = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const cols = [...new Set(rows.flatMap(r => r.segments.map(s => s.name || 'value')))];
+    return `<div class="sr-only"><table><caption>${h(caption)}</caption><thead><tr><th scope="col">loop</th>${cols.map(c => `<th scope="col">${h(c)}</th>`).join('')}</tr></thead><tbody>`
+      + rows.map(r => `<tr><th scope="row">${h(r.label)}</th>${cols.map(c => { const s = r.segments.find(x => (x.name || 'value') === c); return `<td>${s ? h(s.value) : ''}</td>`; }).join('')}</tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  // A failed request may not answer with JSON (a server error page): report
+  // the HTTP status instead of a JSON parse error.
+  async function readJson(response) {
+    try { return await response.json(); } catch (e) { throw new Error('Dashboard request failed (' + response.status + ').'); }
+  }
+
   return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute,
-    ROLES, groupKeys, roleStatus, placeholders, promptLabel, effortChoices, startPayload, startCommand, activeLoopFor };
+    ROLES, groupKeys, roleStatus, placeholders, promptLabel, effortChoices, catalogChoices, catalogSelection, readCatalog, shq, startPayload, startCommand, activeLoopFor,
+    loopHref, chartTable, readJson };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
 </script>
@@ -550,12 +622,18 @@ if (typeof module !== 'undefined') module.exports = RL;
   // ── theme ────────────────────────────────────────────────────────────────
   const root = document.documentElement;
   try { const t = localStorage.getItem('rl-theme'); if (t) root.dataset.theme = t; } catch (e) {}
+  const systemDark = matchMedia('(prefers-color-scheme: dark)');
+  const isDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : systemDark.matches;
+  // The button names the theme it switches to.
+  const themeLabel = () => { $('#theme').textContent = isDark() ? 'Light theme' : 'Dark theme'; };
   $('#theme').onclick = () => {
-    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-    root.dataset.theme = dark ? 'light' : 'dark';
+    root.dataset.theme = isDark() ? 'light' : 'dark';
     try { localStorage.setItem('rl-theme', root.dataset.theme); } catch (e) {}
+    themeLabel();
     route();
   };
+  systemDark.addEventListener('change', themeLabel);
+  themeLabel();
 
   // ── derive ───────────────────────────────────────────────────────────────
   const OUTCOME = RL.OUTCOME;
@@ -584,22 +662,27 @@ if (typeof module !== 'undefined') module.exports = RL;
 
   function barChart(container, rows, opts) {
     container.innerHTML = '';
-    if (!rows.length) { container.innerHTML = '<div class="empty">Nothing to show.</div>'; return; }
-    const W = 600, labelW = 240, rowH = 22, padT = 18, padB = 22, barH = 12;
+    if (!rows.length) { container.innerHTML = `<div class="empty">${opts.empty || 'Nothing to show.'}</div>`; return; }
+    // Drawn at the card's real width so text stays 12px on a phone (a fixed
+    // viewBox would shrink it); 600 while the card is not laid out yet.
+    const W = Math.max(300, Math.round(container.clientWidth) || 600), labelW = Math.min(240, Math.round(W * 0.45)), rowH = 22, padT = 18, padB = 22, barH = 12;
     const H = padT + rows.length * rowH + padB;
     const max = Math.max(1, ...rows.map(r => r.segments.reduce((a, s) => a + s.value, 0)), opts.max || 0);
-    const x = v => labelW + v / max * (W - labelW - 16);
-    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': opts.label });
+    // Leave room after the longest bar for its end label ("5/5").
+    const plotW = W - labelW - (rows.some(r => r.end) ? 36 : 16);
+    const x = v => labelW + v / max * plotW;
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, 'aria-hidden': 'true' });
     const ticks = niceTicks(max, 4);
     ticks.forEach(t => { svg.appendChild(el('line', { x1: x(t), x2: x(t), y1: padT - 6, y2: H - padB, class: 'gridline' })); svg.appendChild(el('text', { x: x(t), y: H - 6, 'text-anchor': 'middle', class: 'tick' }, fmtNum(t))); });
     svg.appendChild(el('line', { x1: labelW, x2: labelW, y1: padT - 6, y2: H - padB, class: 'baseline' }));
     rows.forEach((r, i) => {
       const y = padT + i * rowH + (rowH - barH) / 2;
-      const t = el('text', { x: labelW - 8, y: y + barH - 2, 'text-anchor': 'end' }, r.label);
+      const fit = Math.floor((labelW - 8) / 6.5), name = r.label.length > fit ? r.label.slice(0, fit - 1) + '…' : r.label;
+      const t = el('text', { x: labelW - 8, y: y + barH - 2, 'text-anchor': 'end' }, name);
       t.style.cursor = 'pointer'; t.onclick = () => select(r.id); svg.appendChild(t);
       let acc = 0;
       r.segments.forEach((s, j) => {
-        const w = s.value / max * (W - labelW - 16);
+        const w = s.value / max * plotW;
         const gap = j > 0 && w > 0 ? 2 : 0;
         const p = el('path', { d: barPath(x(acc) + gap, y, Math.max(0, w - gap), barH, 4), fill: s.color, class: 'bar' });
         p.onmousemove = e => showTip(e, r.tip(s)); p.onmouseleave = hideTip; p.onclick = () => select(r.id);
@@ -609,6 +692,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       if (r.end) svg.appendChild(el('text', { x: x(acc) + 6, y: y + barH - 2 }, r.end));
     });
     container.appendChild(svg);
+    container.insertAdjacentHTML('beforeend', RL.chartTable(opts.label, rows));
   }
   function niceTicks(max, n) { const raw = max / n, p = Math.pow(10, Math.floor(Math.log10(raw))); const step = [1, 2, 5, 10].map(m => m * p).find(s => s >= raw) || p; const out = []; for (let v = 0; v <= max + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000); return out; }
 
@@ -618,15 +702,27 @@ if (typeof module !== 'undefined') module.exports = RL;
     let out = '', i = 0, front = null;
     if (lines[0] === '---') { const end = lines.indexOf('---', 1); if (end > 0) { front = lines.slice(1, end); i = end + 1; } }
     if (front) out += '<div class="front">' + front.map(l => { const m = l.match(/^([^:]+):\s*(.*)$/); return m ? `<span><b>${esc(m[1])}</b> ${esc(m[2])}</span>` : esc(l); }).join('') + '</div>';
-    const inline = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\b(R\d+-C\d+)\b/g, '<span class="cid">$1</span>').replace(/^(VERDICT:\s*\w+)$/i, '<span class="verdict">$1</span>');
+    // Code spans first, closed by a backtick run of the same length (so ``a `b` c``
+    // works); nothing inside them is formatted. They are parked as placeholders
+    // while bold, comment IDs and the verdict are marked up around them.
+    const inline = s => {
+      const codes = [];
+      const text = String(s).replace(/(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (m, ticks, body) => { codes.push(body.replace(/^ ([\s\S]*[^ ]) $/, '$1')); return '\u0000' + (codes.length - 1) + '\u0000'; });
+      return esc(text).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\b(R\d+-C\d+)\b/g, '<span class="cid">$1</span>').replace(/^(VERDICT:\s*\w+)$/i, '<span class="verdict">$1</span>')
+        .replace(/\u0000(\d+)\u0000/g, (m, n) => '<code>' + esc(codes[n]) + '</code>');
+    };
+    // A list item continues on following indented lines that do not start a new item.
+    const item = marker => { let t = lines[i++].replace(marker, ''); while (i < lines.length && /^\s+\S/.test(lines[i]) && !/^\s*([-*]|\d+\.)\s+/.test(lines[i])) t += ' ' + lines[i++].trim(); return '<li>' + inline(t) + '</li>'; };
     let para = [];
-    const flush = () => { if (para.length) { out += '<p>' + para.map(inline).join(' ') + '</p>'; para = []; } };
+    const flush = () => { if (para.length) { out += '<p>' + inline(para.join(' ')) + '</p>'; para = []; } };
     while (i < lines.length) {
       const l = lines[i];
       if (/^\s*```/.test(l)) { flush(); let code = []; i++; while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]); i++; out += '<pre><code>' + esc(code.join('\n')) + '</code></pre>'; continue; }
-      const h = l.match(/^(#{1,4})\s+(.*)$/); if (h) { flush(); out += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; i++; continue; }
-      if (/^\s*[-*]\s+/.test(l)) { flush(); out += '<ul>'; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) out += '<li>' + inline(lines[i++].replace(/^\s*[-*]\s+/, '')) + '</li>'; out += '</ul>'; continue; }
-      if (/^\s*\d+\.\s+/.test(l)) { flush(); out += '<ol>'; while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) out += '<li>' + inline(lines[i++].replace(/^\s*\d+\.\s+/, '')) + '</li>'; out += '</ol>'; continue; }
+      // Rendered inside a round (h3): "#" becomes h4 so the page outline stays
+      // in order; the class keeps the size of the markdown level.
+      const h = l.match(/^(#{1,4})\s+(.*)$/); if (h) { flush(); const n = h[1].length, tag = 'h' + Math.min(6, n + 3); out += `<${tag} class="md-h${n}">${inline(h[2])}</${tag}>`; i++; continue; }
+      if (/^\s*[-*]\s+/.test(l)) { flush(); out += '<ul>'; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) out += item(/^\s*[-*]\s+/); out += '</ul>'; continue; }
+      if (/^\s*\d+\.\s+/.test(l)) { flush(); out += '<ol>'; while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) out += item(/^\s*\d+\.\s+/); out += '</ol>'; continue; }
       if (/^\s*\|/.test(l)) { flush(); const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]); const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()); const body = rows.filter(r => !/^\s*\|?\s*:?-+/.test(r)); out += '<table>' + body.map((r, k) => '<tr>' + cells(r).map(c => `<${k === 0 ? 'th' : 'td'}>${inline(c)}</${k === 0 ? 'th' : 'td'}>`).join('') + '</tr>').join('') + '</table>'; continue; }
       if (/^\s*>/.test(l)) { flush(); out += '<blockquote>' + inline(l.replace(/^\s*>\s?/, '')) + '</blockquote>'; i++; continue; }
       if (/^\s*$/.test(l)) { flush(); i++; continue; }
@@ -645,6 +741,7 @@ if (typeof module !== 'undefined') module.exports = RL;
   $('#meta').textContent = `${DATA.root} · generated ${fmtDate(DATA.generated_at)}`;
   function render() {
     const rows = visible();
+    const none = loops.length ? 'No loops match these filters.' : 'No loops yet.';
     $('#f-count').textContent = `${rows.length} of ${loops.length} loop${loops.length === 1 ? '' : 's'}`;
 
     // tiles
@@ -664,19 +761,21 @@ if (typeof module !== 'undefined') module.exports = RL;
     ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join('');
 
     // charts
-    const short = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+    // On a narrow card the time is dropped so the task part of the label stays readable.
+    const narrow = $('#chart-rounds').clientWidth < 480;
+    const short = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, narrow ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
     const label = l => `${short(l.st.started_at)} · ${(l.task.length > 17 ? l.task.slice(0, 16) + '…' : l.task) || l.id}`;
     barChart($('#chart-rounds'), rows.slice(0, 25).map(l => ({
       id: l.id, label: label(l), marker: l.st.max_rounds, end: `${l.roundCount}/${l.st.max_rounds || '?'}`,
-      segments: [{ value: l.roundCount, color: 'var(--s1)' }],
+      segments: [{ name: 'rounds', value: l.roundCount, color: 'var(--muted)' }],
       tip: () => `<b>${esc(l.task)}</b><br>${chip(l.outcome)} · ${l.roundCount} of ${l.st.max_rounds} rounds · ${esc(l.st.backend)}`
-    })), { label: 'Rounds per loop', max: Math.max(0, ...rows.map(l => l.st.max_rounds || 0)) });
+    })), { label: 'Rounds per loop', empty: none, max: Math.max(0, ...rows.map(l => l.st.max_rounds || 0)) });
     const timeRows = rows.filter(l => l.coderTime + l.reviewTime > 0).slice(0, 25);
     barChart($('#chart-time'), timeRows.map(l => ({
       id: l.id, label: label(l) + (l.coderTimeState === 'partial' || l.coderTimeState === 'underestimated' ? ' *' : ''),
       segments: [{ name: 'coder', value: RL.minutesFloor(l.coderTime), color: 'var(--s1)' }, { name: 'reviewer', value: RL.minutesFloor(l.reviewTime), color: 'var(--s2)' }],
       tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${s.name === 'coder' ? fmtCoderTime(l, true) : fmtDur(l.reviewTime)}<br>coder ${fmtCoderTime(l, true)} · reviewer ${fmtDur(l.reviewTime)} · ${l.roundCount} round${l.roundCount === 1 ? '' : 's'}`
-    })), { label: 'Minutes per loop' });
+    })), { label: 'Minutes per loop', empty: rows.length ? 'No timing recorded for these loops yet.' : none });
     $('#time-note').textContent = timeRows.some(l => l.coderTimeState === 'partial' || l.coderTimeState === 'underestimated') ? '* lower bound: some rounds of this loop were recorded before coder timing existed, or a pause ended late (no resume hook), so the coder bar is at least this long.' : '';
     const tokRows = rows.filter(l => l.usage && ((l.coder.output_tokens || 0) + (l.reviewer.output_tokens || 0)) > 0).slice(0, 25);
     $('#card-tokens').style.display = '';
@@ -684,25 +783,89 @@ if (typeof module !== 'undefined') module.exports = RL;
       id: l.id, label: label(l),
       segments: [{ name: 'coder', value: l.coder.output_tokens || 0, color: 'var(--s1)' }, { name: 'reviewer', value: l.reviewer.output_tokens || 0, color: 'var(--s2)' }],
       tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${fmtNum(s.value)} output tokens<br>coder ${fmtNum(l.coder.output_tokens)} · reviewer ${l.reviewerUnknown ? '≥ ' : ''}${fmtNum(l.reviewer.output_tokens)}${l.cost != null ? ' · ' + fmtCost(l.cost) : ''}${l.reviewerUnknown ? `<br>reviewer usage unknown for ${l.reviewerUnknown} round(s)` : ''}`
-    })), { label: 'Output tokens per loop' });
+    })), { label: 'Output tokens per loop', empty: rows.length ? 'No token usage recorded. Turn on usage tracking when starting a loop to see it here.' : none });
 
     // table
     $('#loops tbody').innerHTML = rows.map(l => `<tr data-id="${esc(l.id)}" class="${l.id === selected ? 'selected' : ''}">
-      <td class="mono">${esc(fmtDate(l.st.started_at))}</td>
-      <td><div class="task" title="${esc(l.task)}">${esc(l.task)}</div></td>
+      <td class="mono when">${esc(fmtDate(l.st.started_at))}</td>
+      <td><div class="task" title="${esc(l.task)}"><a href="${esc(RL.loopHref(l.id))}">${esc(l.task || l.id)}</a></div></td>
       <td>${chip(l.outcome)}</td>
       <td class="num">${l.roundCount} / ${l.st.max_rounds || '?'}</td>
       <td class="opt">${esc(l.st.backend)}${l.st.model ? ' <span class="mono">' + esc(l.st.model) + '</span>' : ''}${l.st.effort ? ' <span class="mono">@' + esc(l.st.effort) + '</span>' : ''}</td>
       <td class="num opt" title="${l.coderTimeState === 'complete' ? 'coder time, all rounds' : esc(fmtCoderTime(l, true))}">${fmtCoderTime(l)}</td>
       <td class="num opt" title="review time, all rounds">${l.reviewTime ? fmtDur(l.reviewTime) : '–'}</td>
-      <td class="num opt">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No loops match.</td></tr>';
+      <td class="num opt">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || `<tr><td colspan="8" class="empty">${loops.length ? none : 'No loops yet. <a href="#/start">Start a loop</a>, or run /review-loop in Claude Code.'}</td></tr>`;
     document.querySelectorAll('#loops tbody tr[data-id]').forEach(tr => tr.onclick = () => select(tr.dataset.id));
   }
 
   // ── configuration panel ──────────────────────────────────────────────────
   const CFG = DATA.config || {};
-  let startReady = false;
+  // Editing another provider must not change the defaults used by start.sh.
+  const launchProvider = (CFG.show || {}).provider || '';
+  let launchEffective = (CFG.show || {}).effective || {};
+  let startReady = false, startBusy = false;
   const cfgState = { scope: 'project', mode: 'shared', provider: '', form: {}, initial: {}, force: new Set(), remove: new Set() };
+  let cfgSaveTimer = null, cfgSaving = false, cfgFileHandle = null, cfgFileTarget = '';
+  // Re-rendering a form replaces its controls: put keyboard focus back on the
+  // control (same id) that had it.
+  function keepFocus(container, render) {
+    const a = document.activeElement, id = a && a.id && container.contains(a) ? a.id : '';
+    render();
+    const f = id && document.getElementById(id);
+    if (f) f.focus();
+  }
+  function catalogSelect(kind, value, catalog, model, attribute, disabled) {
+    return `<select ${attribute} ${disabled ? 'disabled' : ''}>${RL.catalogChoices(catalog, kind, value, model).map(c => `<option value="${esc(c.value)}" ${c.value === value ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select>`;
+  }
+  function catalogActions(id, backend) {
+    const cat = (CFG.models || {})[backend] || {};
+    return `<div class="src"><button type="button" class="mini" id="${id}-refresh" ${backend ? '' : 'disabled'}>${DATA.serve ? 'Refresh available options' : 'Load model catalog…'}</button>`
+      + (!DATA.serve ? ` <button type="button" class="mini" id="${id}-export" ${backend ? '' : 'disabled'}>Copy catalog command</button><input type="file" id="${id}-file" accept=".json,.html" hidden>` : '')
+      + `<div id="${id}-status" data-catalog-backend="${esc(backend)}" role="status">${esc(!backend ? 'Select a backend to load options.' : !(cat.models || []).length ? 'No models loaded. ' + (cat.note || 'Load the backend catalog to populate the dropdowns.') : '')}</div></div>`;
+  }
+  function bindCatalogActions(id, backend) {
+    const status = (message, error) => { const el = $('#' + id + '-status'); if (el && el.dataset.catalogBackend === backend) { el.textContent = message; el.className = error ? 'err' : ''; } };
+    const apply = data => {
+      const cat = RL.readCatalog(data, backend);
+      CFG.models = Object.assign({}, CFG.models, { [backend]: cat });
+      if (cfgState.form.backend === backend) { cfgRenderRows(); cfgUpdate(); }
+      if (startReady && (startState.backend || launchEffective.backend) === backend) { startRenderFields(); startUpdate(); }
+      status(cat.models.length ? `${cat.models.length} models loaded. Effort options follow the selected model.` : 'No models available. ' + (cat.note || 'Initialize the backend CLI, then refresh its catalog.'));
+    };
+    const refresh = $('#' + id + '-refresh');
+    refresh.onclick = async () => {
+      if (!DATA.serve) { $('#' + id + '-file').click(); return; }
+      refresh.disabled = true; status('Loading available options…');
+      try {
+        const scope = id === 'cfg-model' ? { scope: cfgState.scope, mode: cfgState.mode, provider: cfgState.mode === 'shared' ? null : cfgState.provider } : {};
+        const response = await fetch('/api/models', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RL-Token': DATA.serve.token }, body: JSON.stringify({ backend, ...scope }) });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.output || 'Catalog refresh failed (' + response.status + ').');
+        apply(result.catalog);
+      } catch (e) { status('Could not load options: ' + e.message, true); }
+      finally { refresh.disabled = !backend; }
+    };
+    if (!DATA.serve) {
+      $('#' + id + '-export').onclick = async () => {
+        const scope = id === 'cfg-model' ? RL.scopeFlags(cfgState).map(RL.shq).join(' ') + ' ' : '';
+        const command = `bash ${RL.shq(CFG.script)} models ${scope}--backend ${RL.shq(backend)}`;
+        status('Run in the project; the script saves beside your config. Regenerate the dashboard to read it automatically, or press Load model catalog and choose the saved catalog: ' + command);
+        try { await navigator.clipboard.writeText(command); } catch (e) { /* The visible command remains selectable. */ }
+      };
+      $('#' + id + '-file').onchange = async e => {
+        const file = e.target.files[0]; if (!file) return;
+        try {
+          const text = await file.text();
+          if (text.trimStart().startsWith('<')) {
+            const data = new DOMParser().parseFromString(text, 'text/html').getElementById('rl-data');
+            if (!data) throw new Error('Choose an exported catalog JSON or a generated dashboard HTML file.');
+            apply(JSON.parse(data.textContent));
+          } else apply(JSON.parse(text));
+        } catch (error) { status('Could not load options: ' + error.message, true); }
+        e.target.value = '';
+      };
+    }
+  }
   function cfgInit() {
     const show = CFG.show;
     if (!show) { $('#cfg-hint').textContent = 'Configuration unavailable (config.sh could not run when the page was generated).'; return; }
@@ -731,8 +894,8 @@ if (typeof module !== 'undefined') module.exports = RL;
   function cfgRender() {
     const sc = cfgState, show = CFG.show;
     $('#cfg-hint').textContent = (DATA.serve
-      ? `Edit values and press Apply: changes are written through config.sh (provider "${show.provider || 'none'}"). Each value shows where it comes from; a value set by a higher-precedence file masks what you write, and config.sh warns about that.`
-      : `Edit values, then copy the command or save the file. This is a static page: nothing is written until you run the command or save. Run "dashboard.sh --serve" to apply changes directly with validation.`)
+      ? `Changes save automatically through config.sh (provider "${show.provider || 'none'}"). Each value shows where it comes from; a higher-precedence setting can mask what you save.`
+      : `Enable auto-save by choosing the configuration file, then edit values. This static page needs browser file access to save automatically. You can also copy the command or download a new file; served pages save automatically through config.sh.`)
       + (show.redacted_user_config ? ' Values from your user configuration (~) and environment are hidden in this static page so it can be shared (the backends\' default model and effort too); use --with-user-config or --serve to see them.' : '');
     $('#cfg-scope').innerHTML = `
       <label>Write to <select id="cfg-scope-sel">
@@ -750,13 +913,13 @@ if (typeof module !== 'undefined') module.exports = RL;
     const pi = $('#cfg-provider'); if (pi) pi.oninput = e => { sc.provider = e.target.value.trim().toLowerCase(); sc.force.clear(); sc.remove.clear(); cfgRenderRows(); cfgUpdate(); };
     cfgRenderRows();
     const canFs = typeof window.showSaveFilePicker === 'function';
-    $('#cfg-actions').innerHTML = (DATA.serve ? `<button type="button" class="primary" id="cfg-apply">Apply</button>` : '')
+    $('#cfg-actions').innerHTML = (DATA.serve ? `<button type="button" id="cfg-apply">Save now / retry</button>` : '')
       + `<button type="button" id="cfg-copy">Copy command</button>`
-      + `<button type="button" id="cfg-save" title="${canFs ? 'merge into the chosen file' : 'download a new file; existing files need the command'}">${canFs ? 'Save file…' : 'Download new file'}</button>`
+      + (!DATA.serve ? `<button type="button" id="cfg-save" title="${canFs ? 'choose the config file once to enable automatic saves' : 'download a new file; existing files need the command'}">${canFs ? 'Enable auto-save…' : 'Download new file'}</button>` : '')
       + `<button type="button" id="cfg-reset">Reset</button>`;
     $('#cfg-apply') && ($('#cfg-apply').onclick = cfgApply);
-    $('#cfg-copy').onclick = () => { const c = $('#cfg-cmd').textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => cfgOut('command copied', 'ok'), () => cfgOut('copy failed; select the command and copy it manually', 'err')); };
-    $('#cfg-save').onclick = cfgSave;
+    $('#cfg-copy').onclick = () => { const c = $('#cfg-cmd').textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => cfgOut('Command copied.', 'ok'), () => cfgOut('Could not copy. Select the command and copy it yourself.', 'err')); };
+    $('#cfg-save') && ($('#cfg-save').onclick = cfgSave);
     $('#cfg-reset').onclick = () => { cfgInit(); cfgOut('', ''); };
     const files = (show.files || []).map(f => `<li><code>${esc(f.path)}</code> (${f.label}, ${f.exists ? 'exists' : 'missing'})</li>`).join('')
       + (CFG.provider_files || []).filter(f => f.provider !== show.provider).map(f => `<li><code>${esc(f.path)}</code> (${f.label}, other provider)</li>`).join('');
@@ -765,25 +928,22 @@ if (typeof module !== 'undefined') module.exports = RL;
   }
   function cfgRenderRows() {
     const sc = cfgState;
+    const active = document.activeElement;
+    const focusKey = active && active.dataset && active.dataset.key;
+    const selection = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
     const rowHtml = k => {
       const v = sc.form[k.key] ?? '';
       const removed = sc.remove.has(k.key);
       let input;
+      // The label names the control; the help line (with any error) describes it.
+      const ctl = `data-key="${k.key}" id="cfg-f-${k.key}" aria-describedby="cfg-h-${k.key}"`;
       const cat = (CFG.models || {})[sc.form.backend] || { models: [], efforts: [] };
-      if (k.key === 'backend') input = `<select data-key="${k.key}" ${removed ? 'disabled' : ''}>${(CFG.backends || []).map(b => `<option ${b === v ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(v) ? '' : `<option selected>${esc(v)}</option>`}</select>`;
-      else if (k.key === 'model') input = `<input type="text" data-key="${k.key}" value="${esc(v)}" list="rl-models" placeholder="backend default" ${removed ? 'disabled' : ''}>`
-        + `<datalist id="rl-models">${(cat.models || []).map(m => `<option value="${esc(m.id)}">${esc(m.label || m.id)}${m.default ? ' (default)' : ''}</option>`).join('')}</datalist>`;
-      else if (k.key === 'effort') {
-        // Levels of the chosen model when it is listed, else the backend's.
-        const ch = RL.effortChoices(cat, sc.form.model), lm = (cat.models || []).find(x => x && x.id === sc.form.model);
-        const def = (lm && lm.default_effort) || cat.default_effort;
-        input = ch.length
-          ? `<select data-key="${k.key}" ${removed ? 'disabled' : ''}><option value="" ${v === '' ? 'selected' : ''}>default${def ? ' (' + esc(def) + ')' : ''}</option>${ch.map(e => `<option value="${esc(e)}" ${e === v ? 'selected' : ''}>${esc(e)}</option>`).join('')}${ch.includes(v) || v === '' ? '' : `<option value="${esc(v)}" selected>${esc(v)} (not listed)</option>`}</select>`
-          : `<input type="text" data-key="${k.key}" value="${esc(v)}" placeholder="backend default" ${removed ? 'disabled' : ''}>`;
-      }
-      else if (k.type === 'boolean') input = `<span class="check"><input type="checkbox" data-key="${k.key}" ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}> <span>${/^(1|true|yes|y|on)$/i.test(v) ? 'on' : 'off'}</span></span>`;
-      else if (k.type === 'integer') input = `<input type="number" min="1" step="1" data-key="${k.key}" value="${esc(v)}" ${removed ? 'disabled' : ''}>`;
-      else input = `<input type="text" data-key="${k.key}" value="${esc(v)}" placeholder="${k.type === 'list' ? 'comma-separated' : ''}" ${removed ? 'disabled' : ''}>`;
+      if (k.key === 'backend') input = `<select ${ctl} ${removed ? 'disabled' : ''}>${(CFG.backends || []).map(b => `<option ${b === v ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(v) ? '' : `<option selected>${esc(v)}</option>`}</select>`;
+      else if (k.key === 'model' || k.key === 'effort') input = catalogSelect(k.key, v, cat, sc.form.model, ctl, removed)
+        + (k.key === 'model' ? catalogActions('cfg-model', sc.form.backend) : '');
+      else if (k.type === 'boolean') input = `<span class="check"><input type="checkbox" ${ctl} ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}> <span>${/^(1|true|yes|y|on)$/i.test(v) ? 'on' : 'off'}</span></span>`;
+      else if (k.type === 'integer') input = `<input type="number" min="1" step="1" ${ctl} value="${esc(v)}" ${removed ? 'disabled' : ''}>`;
+      else input = `<input type="text" ${ctl} value="${esc(v)}" placeholder="${k.type === 'list' ? 'comma-separated' : ''}" ${removed ? 'disabled' : ''}>`;
       const inTarget = targetHas(k.key);
       const tv = inTarget ? RL.toRaw(k.type, targetValue(k)) : null;
       const tools = `<span class="tools">`
@@ -792,7 +952,7 @@ if (typeof module !== 'undefined') module.exports = RL;
         + `</span>`;
       const hidden = (CFG.show.redacted_user_config && /^(user |env )/.test(srcOf(k.key)));
       const tgt = cfgTargetFile().redacted ? ' · target contents hidden' : inTarget ? ` · in target: ${esc(tv === '' ? '(empty)' : tv)}` : ' · not in target';
-      return `<div class="cfg-row" data-row="${k.key}"><label title="${esc(k.help)}">${esc(k.key)} <span class="src">· ${esc(srcOf(k.key))}${hidden ? ' (value hidden)' : ''}${tgt}</span></label>${input}<div class="src"><span class="err" data-err="${k.key}"></span>${esc(k.help)} ${tools}</div></div>`;
+      return `<div class="cfg-row" data-row="${k.key}"><div><label for="cfg-f-${k.key}" title="${esc(k.help)}">${esc(k.key)}</label> <span class="src">· ${esc(srcOf(k.key))}${hidden ? ' (value hidden)' : ''}${tgt}</span></div>${input}<div class="src" id="cfg-h-${k.key}"><span class="err" data-err="${k.key}"></span>${esc(k.help)} ${tools}</div></div>`;
     };
     // One card per agent role: what it runs with now, its two keys, and the
     // default template with the placeholders a replacement may use.
@@ -809,18 +969,33 @@ if (typeof module !== 'undefined') module.exports = RL;
     };
     // Any prompts.* key no role card covers still gets an ordinary row.
     const roleKeys = new Set(RL.ROLES.flatMap(d => [d.template, d.extra]));
-    $('#cfg-grid').innerHTML = RL.groupKeys(CFG.keys || []).map(g => `<h3 class="cfg-group">${esc(g.title)}</h3>`
+    keepFocus($('#cfg-grid'), () => { $('#cfg-grid').innerHTML = RL.groupKeys(CFG.keys || []).map(g => `<h3 class="cfg-group">${esc(g.title)}</h3>`
       + (g.id === 'roles'
         ? `<div class="role-cards">${RL.ROLES.map(roleCard).join('')}</div><div class="cfg-grid">${g.keys.filter(k => !roleKeys.has(k.key)).map(rowHtml).join('')}</div>`
-        : `<div class="cfg-grid">${g.keys.map(rowHtml).join('')}</div>`)).join('');
+        : `<div class="cfg-grid">${g.keys.map(rowHtml).join('')}</div>`)).join(''); });
     $('#cfg-grid').querySelectorAll('[data-key]').forEach(el => {
-      const h = () => { sc.form[el.dataset.key] = el.type === 'checkbox' ? String(el.checked) : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; const fb = $(`[data-force="${el.dataset.key}"]`); if (fb) fb.style.display = sc.form[el.dataset.key] === sc.initial[el.dataset.key] ? '' : 'none'; if (el.dataset.key === 'backend') cfgRenderRows(); cfgUpdate(); };
-      // The effort choices follow the model: re-render once a model edit is
-      // committed (on change, not per keystroke, so typing keeps its focus).
-      el.oninput = h; el.onchange = el.dataset.key === 'model' ? () => { h(); cfgRenderRows(); cfgUpdate(); } : h;
+      const h = () => {
+        const key = el.dataset.key;
+        sc.form[key] = el.type === 'checkbox' ? String(el.checked) : el.value;
+        if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off';
+        const fb = $(`[data-force="${key}"]`);
+        if (fb) fb.style.display = sc.form[key] === sc.initial[key] ? '' : 'none';
+        if (['backend', 'model'].includes(key)) {
+          Object.assign(sc.form, RL.catalogSelection((CFG.models || {})[sc.form.backend] || {}, sc.form.model, sc.form.effort, key === 'backend'));
+          cfgRenderRows();
+        }
+        cfgUpdate();
+      };
+      el.onchange = h;
+      if (el.tagName !== 'SELECT') el.oninput = h;
     });
+    if ($('#cfg-model-refresh')) bindCatalogActions('cfg-model', sc.form.backend);
     $('#cfg-grid').querySelectorAll('[data-unset]').forEach(b => b.onclick = () => { const k = b.dataset.unset; if (sc.remove.has(k)) sc.remove.delete(k); else { sc.remove.add(k); sc.force.delete(k); } cfgRenderRows(); cfgUpdate(); });
     $('#cfg-grid').querySelectorAll('[data-force]').forEach(b => b.onclick = () => { const k = b.dataset.force; if (sc.force.has(k)) sc.force.delete(k); else sc.force.add(k); b.textContent = sc.force.has(k) ? 'writing' : 'write'; cfgUpdate(); });
+    if (focusKey) {
+      const input = $(`[data-key="${focusKey}"]`);
+      if (input && !input.disabled) { input.focus({ preventScroll: true }); if (selection) input.setSelectionRange(...selection); }
+    }
   }
   function cfgChanges() { return RL.diffConfig(CFG.keys || [], CFG.show.effective || {}, cfgState.form, { force: [...cfgState.force], remove: [...cfgState.remove] }); }
   function cfgErrors(ch) {
@@ -829,7 +1004,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     for (const k of CFG.keys || []) if (k.key in ch.set) { const e = RL.validateValue(k, ch.set[k.key], CFG.backends, cat, cfgState.form.model); if (e) errs[k.key] = e; }
     return errs;
   }
-  function cfgUpdate() {
+  function cfgUpdate(suppressAutosave = false) {
     const sc = cfgState, ch = cfgChanges(), n = Object.keys(ch.set).length + ch.unset.length;
     const errs = cfgErrors(ch), bad = sc.mode !== 'shared' && !/^[a-z0-9][a-z0-9_-]*$/.test(sc.provider || '') || sc.provider === 'none';
     (CFG.keys || []).forEach(k => {
@@ -843,21 +1018,80 @@ if (typeof module !== 'undefined') module.exports = RL;
     $('#cfg-cmd').textContent = !n ? '# no changes' : bad ? '# enter a valid provider name' : errText ? '# fix: ' + errText : RL.buildCommand(CFG.script, sc, ch);
     const ok = n > 0 && !bad && !errText;
     const ap = $('#cfg-apply'); if (ap) ap.disabled = !ok;
-    $('#cfg-save').disabled = !ok || (!canPick() && (t.exists || t.redacted));
+    const save = $('#cfg-save');
+    const connected = cfgFileHandle && cfgFileTarget === t.path;
+    if (save) {
+      save.textContent = canPick() ? connected ? 'Save now / retry' : 'Enable auto-save…' : 'Download new file';
+      save.disabled = cfgSaving || (canPick() ? connected && !ok : !ok || t.exists || t.redacted);
+    }
     $('#cfg-copy').disabled = !ok;
+    if (cfgSaveTimer !== null) { clearTimeout(cfgSaveTimer); cfgSaveTimer = null; }
+    if (!suppressAutosave && !cfgSaving && ok && (DATA.serve || connected)) {
+      cfgSaveTimer = setTimeout(() => { cfgSaveTimer = null; return cfgApply(); }, 400);
+      cfgOut('Unsaved changes — saving automatically…', '');
+    }
+    // Keep the destination stable while a save is pending. Value controls stay
+    // editable; their newer contents are reconciled after the request returns.
+    const locked = cfgSaving || cfgSaveTimer !== null;
+    for (const id of ['#cfg-scope-sel', '#cfg-provider', '#cfg-reset']) { const el = $(id); if (el) el.disabled = locked; }
+    $('#cfg-grid').querySelectorAll('[data-unset], [data-force]').forEach(el => { el.disabled = cfgSaving; });
+    if (ap) ap.disabled = !ok || cfgSaving;
   }
   function cfgOut(text, cls) { const o = $('#cfg-out'); o.textContent = text; o.className = 'cfg-out ' + (cls || ''); }
   async function cfgApply() {
+    if (cfgSaving) return;
+    if (cfgSaveTimer !== null) { clearTimeout(cfgSaveTimer); cfgSaveTimer = null; }
     const ch = cfgChanges(); if (!Object.keys(ch.set).length && !ch.unset.length) return;
+    if (Object.values(cfgErrors(ch)).length) return;
     const sc = cfgState;
-    cfgOut('applying…', '');
+    const form = { ...sc.form }, target = cfgTargetFile(), section = sectionOf(sc);
+    const payload = { scope: sc.scope, mode: sc.mode, provider: sc.mode === 'shared' ? null : sc.provider, set: ch.set, unset: ch.unset };
+    cfgSaving = true; cfgUpdate(); cfgOut('Saving…', '');
+    let succeeded = false;
     try {
-      const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RL-Token': DATA.serve.token },
-        body: JSON.stringify({ scope: sc.scope, mode: sc.mode, provider: sc.mode === 'shared' ? null : sc.provider, set: ch.set, unset: ch.unset }) });
-      const j = await r.json();
-      cfgOut(j.output || (j.ok ? 'done' : 'failed'), j.ok ? 'ok' : 'err');
-      if (j.ok) setTimeout(() => location.reload(), 900);
-    } catch (e) { cfgOut('request failed: ' + e, 'err'); }
+      let show, nextLaunch = launchEffective, output = '';
+      if (DATA.serve) {
+        const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RL-Token': DATA.serve.token }, body: JSON.stringify(payload) });
+        const j = await RL.readJson(r);
+        if (!r.ok || !j.ok || !j.show || !j.launch_effective) throw new Error(j.output || 'Could not save configuration.');
+        show = j.show; output = j.output || '';
+        nextLaunch = j.launch_effective;
+      } else {
+        if (!cfgFileHandle || cfgFileTarget !== target.path) throw new Error('Choose the configuration file to enable auto-save.');
+        const text = await (await cfgFileHandle.getFile()).text();
+        const lj = RL.losslessJSON(text.trim() ? text : '{}');
+        if (!lj.doc || typeof lj.doc !== 'object' || Array.isArray(lj.doc)) throw new Error('The selected file must contain a JSON object.');
+        const doc = RL.applyToFile(lj.doc, section, ch, CFG.keys || []);
+        const w = await cfgFileHandle.createWritable();
+        try { await w.write(lj.stringify(doc) + '\n'); await w.close(); }
+        catch (e) { if (w.abort) await w.abort(); throw e; }
+        show = { ...CFG.show, effective: RL.applyToFile(CFG.show.effective || {}, [], { set: ch.set, unset: [] }, CFG.keys || []) };
+        if (sc.mode === 'shared' || sc.provider === launchProvider) {
+          nextLaunch = RL.applyToFile(launchEffective, [], { set: ch.set, unset: [] }, CFG.keys || []);
+        }
+        Object.assign(target, { exists: true, values: doc });
+        const known = (show.files || []).find(f => f.path === target.path);
+        if (known) Object.assign(known, { exists: true, values: doc });
+      }
+      CFG.show = show;
+      launchEffective = nextLaunch;
+      for (const k of CFG.keys || []) {
+        const value = RL.toRaw(k.type, RL.getPath(show.effective, k.key));
+        sc.initial[k.key] = value;
+        if (sc.form[k.key] === form[k.key]) sc.form[k.key] = value;
+      }
+      for (const key of [...Object.keys(ch.set), ...ch.unset]) { sc.force.delete(key); sc.remove.delete(key); }
+      cfgRenderRows();
+      if (startReady) { startRenderFields(); startUpdate(); }
+      succeeded = true;
+      const warnings = output.split('\n').filter(line => /warning:/.test(line)).join('\n');
+      cfgOut('Saved automatically to ' + target.path + (warnings ? '\n' + warnings : '') + (!DATA.serve ? '\nRegenerate the dashboard to refresh inherited values and their sources.' : ''), 'ok');
+    } catch (e) { cfgOut('Not saved: ' + e.message + ' Use Save now / retry to try again.', 'err'); }
+    finally {
+      cfgSaving = false;
+      // A failed save is retried only by the user or a new edit, never in a loop.
+      cfgUpdate(!succeeded);
+    }
   }
   // Save file: merge the change set into the target's CURRENT contents. With the
   // file picker the chosen file is re-read and round-tripped losslessly (number
@@ -870,20 +1104,21 @@ if (typeof module !== 'undefined') module.exports = RL;
     if (Object.values(cfgErrors(ch)).length) return;
     const name = f.path.split('/').pop();
     if (canPick()) {
+      if (cfgFileHandle && cfgFileTarget === f.path) { await cfgApply(); return; }
       try {
         const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
         let lj;
-        try { const txt = await (await h.getFile()).text(); lj = RL.losslessJSON(txt.trim() ? txt : '{}'); } catch (e) { cfgOut('the chosen file is not valid JSON; not overwriting it', 'err'); return; }
-        if (!lj.doc || typeof lj.doc !== 'object' || Array.isArray(lj.doc)) { cfgOut('the chosen file does not hold a JSON object; not overwriting it', 'err'); return; }
-        const doc = RL.applyToFile(lj.doc, section, ch, CFG.keys || []);
-        const w = await h.createWritable(); await w.write(lj.stringify(doc) + '\n'); await w.close();
-        cfgOut(`saved ${h.name} (merged into its current contents). Make sure it is ${f.path} so config.sh and the loop read it.`, 'ok'); return;
-      } catch (e) { if (e && e.name === 'AbortError') return; cfgOut('save failed: ' + e, 'err'); return; }
+        try { const txt = await (await h.getFile()).text(); lj = RL.losslessJSON(txt.trim() ? txt : '{}'); } catch (e) { cfgOut('The chosen file is not valid JSON, so it was left unchanged.', 'err'); return; }
+        if (!lj.doc || typeof lj.doc !== 'object' || Array.isArray(lj.doc)) { cfgOut('The chosen file does not contain a JSON object, so it was left unchanged.', 'err'); return; }
+        cfgFileHandle = h; cfgFileTarget = f.path;
+        cfgOut(`Auto-save enabled for ${h.name}. Choose ${f.path} so the loop reads your changes.`, 'ok');
+        cfgUpdate(); return;
+      } catch (e) { if (e && e.name === 'AbortError') return; cfgOut('Could not save: ' + ((e && e.message) || e), 'err'); return; }
     }
-    if (f.exists || f.redacted) { cfgOut(`${f.path} already exists and this browser cannot re-read it safely; run the command above instead (it merges through config.sh).`, 'err'); return; }
+    if (f.exists || f.redacted) { cfgOut(`${f.path} already exists and this browser cannot safely re-read it. Run the command above instead; it merges your changes through config.sh.`, 'err'); return; }
     const doc = RL.applyToFile({}, section, ch, CFG.keys || []);
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' })); a.download = name; a.click();
-    cfgOut(`downloaded ${name}; move it to ${f.path}`, 'ok');
+    cfgOut(`Downloaded ${name}. Move it to ${f.path} so the loop reads it.`, 'ok');
   }
 
   // ── Start a loop ─────────────────────────────────────────────────────────
@@ -895,77 +1130,90 @@ if (typeof module !== 'undefined') module.exports = RL;
   const startScript = () => (CFG.script || '').replace(/config\.sh$/, 'start.sh');
   const activeLoop = () => RL.activeLoopFor(DATA.loops, DATA.root);
   function startInit() {
-    const eff = (CFG.show || {}).effective || {};
+    const eff = launchEffective;
     Object.assign(startState, { backend: eff.backend || '', model: eff.model || '', effort: eff.effort || '', max_rounds: eff.max_rounds == null ? '' : String(eff.max_rounds), usage: !!eff.usage });
     const t = $('#start-task'); t.value = startState.task; t.oninput = () => { startState.task = t.value; startUpdate(); };
     $('#start-hint').textContent = DATA.serve
       ? 'Describe the task and press Start: the loop is created here (start.sh), then any Claude Code session in this project is held to it by the Stop hook until the reviewer approves.'
       : 'Describe the task; this static page shows the start.sh command to run in the project (run "dashboard.sh --serve" to start loops from here).';
-    if (activeLoop()) startOut(`a loop is already active in this project (${activeLoop().id}); cancel it first`, '');
+    if (activeLoop()) startOut(`A loop is already active in this project (${activeLoop().id}). Cancel it with /review-cancel before starting another.`, '');
     startRenderFields();
     $('#start-actions').innerHTML = (DATA.serve ? '<button type="button" class="primary" id="start-go">Start</button>' : '')
       + '<button type="button" id="start-copy">Copy command</button>';
     $('#start-go') && ($('#start-go').onclick = startGo);
-    $('#start-copy').onclick = () => { const c = $('#start-cmd').textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => startOut('command copied', 'ok'), () => startOut('copy failed; select the command and copy it manually', 'err')); };
+    $('#start-copy').onclick = () => { const c = $('#start-cmd').textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => startOut('Command copied.', 'ok'), () => startOut('Could not copy. Select the command and copy it yourself.', 'err')); };
     startUpdate();
   }
   function startRenderFields() {
-    const st = startState, eff = (CFG.show || {}).effective || {};
+    const st = startState, eff = launchEffective;
     // An empty backend means "inherit the configuration" (on a shareable page
     // the configured value may be hidden): offered as its own option so the
     // select never shows a backend other than the one that will run.
     const cat = (CFG.models || {})[st.backend || eff.backend] || { models: [], efforts: [] };
-    const ch = RL.effortChoices(cat, st.model), lm = (cat.models || []).find(x => x && x.id === st.model);
-    const def = (lm && lm.default_effort) || cat.default_effort;
-    $('#start-fields').innerHTML = `
-      <div class="cfg-row"><label>Backend</label><select data-start="backend"><option value="" ${st.backend === '' ? 'selected' : ''}>inherit configuration${eff.backend ? ' (' + esc(eff.backend) + ')' : ''}</option>${(CFG.backends || []).map(b => `<option ${b === st.backend ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(st.backend) || !st.backend ? '' : `<option selected>${esc(st.backend)}</option>`}</select></div>
-      <div class="cfg-row"><label>Model</label><input type="text" data-start="model" value="${esc(st.model)}" list="rl-start-models" placeholder="backend default"><datalist id="rl-start-models">${(cat.models || []).map(m => `<option value="${esc(m.id)}">${esc(m.label || m.id)}${m.default ? ' (default)' : ''}</option>`).join('')}</datalist></div>
-      <div class="cfg-row"><label>Effort</label>${ch.length
-        ? `<select data-start="effort"><option value="" ${st.effort === '' ? 'selected' : ''}>default${def ? ' (' + esc(def) + ')' : ''}</option>${ch.map(e => `<option value="${esc(e)}" ${e === st.effort ? 'selected' : ''}>${esc(e)}</option>`).join('')}${ch.includes(st.effort) || st.effort === '' ? '' : `<option value="${esc(st.effort)}" selected>${esc(st.effort)} (not listed)</option>`}</select>`
-        : `<input type="text" data-start="effort" value="${esc(st.effort)}" placeholder="backend default">`}</div>
-      <div class="cfg-row"><label>Max rounds</label><input type="number" min="1" step="1" data-start="max_rounds" value="${esc(st.max_rounds)}"></div>
-      <div class="cfg-row"><label>Usage tracking</label><span class="check"><input type="checkbox" data-start="usage" ${st.usage ? 'checked' : ''}> <span>${st.usage ? 'on' : 'off'}</span></span></div>`;
+    keepFocus($('#start-fields'), () => { $('#start-fields').innerHTML = `
+      <div class="cfg-row"><label for="start-f-backend">Backend</label><select data-start="backend" id="start-f-backend"><option value="" ${st.backend === '' ? 'selected' : ''}>inherit configuration${eff.backend ? ' (' + esc(eff.backend) + ')' : ''}</option>${(CFG.backends || []).map(b => `<option ${b === st.backend ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(st.backend) || !st.backend ? '' : `<option selected>${esc(st.backend)}</option>`}</select></div>
+      <div class="cfg-row"><label for="start-f-model">Model</label>${catalogSelect('model', st.model, cat, st.model, 'data-start="model" id="start-f-model"', false)}${catalogActions('start-model', st.backend || eff.backend)}</div>
+      <div class="cfg-row"><label for="start-f-effort">Effort</label>${catalogSelect('effort', st.effort, cat, st.model, 'data-start="effort" id="start-f-effort"', false)}</div>
+      <div class="cfg-row"><label for="start-f-max_rounds">Max rounds</label><input type="number" min="1" step="1" data-start="max_rounds" id="start-f-max_rounds" value="${esc(st.max_rounds)}"></div>
+      <div class="cfg-row"><label for="start-f-usage">Usage tracking</label><span class="check"><input type="checkbox" data-start="usage" id="start-f-usage" ${st.usage ? 'checked' : ''}> <span>${st.usage ? 'on' : 'off'}</span></span></div>`; });
     $('#start-fields').querySelectorAll('[data-start]').forEach(el => {
-      const h = () => { st[el.dataset.start] = el.type === 'checkbox' ? el.checked : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; if (el.dataset.start === 'backend') startRenderFields(); startUpdate(); };
-      el.oninput = h; el.onchange = el.dataset.start === 'model' ? () => { h(); startRenderFields(); startUpdate(); } : h;
+      const h = () => {
+        const key = el.dataset.start;
+        st[key] = el.type === 'checkbox' ? el.checked : el.value;
+        if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off';
+        if (['backend', 'model'].includes(key)) {
+          Object.assign(st, RL.catalogSelection((CFG.models || {})[st.backend || eff.backend] || {}, st.model, st.effort, key === 'backend'));
+          startRenderFields();
+        }
+        startUpdate();
+      };
+      el.onchange = h;
+      if (el.tagName !== 'SELECT') el.oninput = h;
     });
+    bindCatalogActions('start-model', st.backend || eff.backend);
   }
   function startUpdate() {
-    const st = startState, eff = (CFG.show || {}).effective || {}, cat = (CFG.models || {})[st.backend || eff.backend] || null;
+    const st = startState, eff = launchEffective, cat = (CFG.models || {})[st.backend || eff.backend] || null;
     const active = activeLoop();
     const effErr = RL.validateValue({ key: 'effort', type: 'string' }, st.effort, CFG.backends, cat, st.model);
     const mrErr = st.max_rounds === '' ? '' : RL.validateValue({ key: 'max_rounds', type: 'integer' }, st.max_rounds, CFG.backends);
     const problem = !st.task.trim() ? '# describe the task' : active ? `# a loop is already active (${active.id}); cancel it first (/review-cancel)` : effErr ? '# fix: ' + effErr : mrErr ? '# fix: ' + mrErr : '';
     $('#start-cmd').textContent = problem || RL.startCommand(startScript(), st, eff);
     const ok = !problem;
-    const go = $('#start-go'); if (go) go.disabled = !ok;
+    const go = $('#start-go'); if (go) go.disabled = !ok || startBusy;
     $('#start-copy').disabled = !ok;
   }
   function startOut(text, cls) { const o = $('#start-out'); o.textContent = text; o.className = 'cfg-out ' + (cls || ''); }
   async function startGo() {
+    if (startBusy) return; // one start request at a time
     const st = startState;
-    startOut('starting…', ''); $('#start-next').style.display = 'none';
+    startBusy = true; startUpdate();
+    startOut('Starting the loop…', ''); $('#start-next').style.display = 'none';
+    let started = false;
     try {
       const r = await fetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RL-Token': DATA.serve.token },
-        body: JSON.stringify(RL.startPayload(st, (CFG.show || {}).effective || {})) });
-      const j = await r.json();
-      startOut(j.output || (j.ok ? 'started' : 'failed'), j.ok ? 'ok' : 'err');
+        body: JSON.stringify(RL.startPayload(st, launchEffective)) });
+      const j = await RL.readJson(r);
+      startOut(j.output || (j.ok ? 'Loop started.' : 'The loop did not start.'), j.ok ? 'ok' : 'err');
       if (j.ok) {
+        started = true; // the page reloads; keep Start disabled until then
         const n = $('#start-next'); n.style.display = '';
         n.innerHTML = `<b>Loop ${esc(j.loop_id || '')} started.</b> Next: open Claude Code in <span class="mono">${esc(j.root || DATA.root)}</span> and send any message — the Stop hook keeps the coder on this task until the reviewer approves. Opening the loop's page…`;
         setTimeout(() => { if (j.loop_id) location.hash = '#/loop/' + encodeURIComponent(j.loop_id); location.reload(); }, 2500);
       }
-    } catch (e) { startOut('request failed: ' + e, 'err'); }
+    } catch (e) { startOut('Could not start the loop: ' + e.message, 'err'); }
+    finally { if (!started) { startBusy = false; startUpdate(); } }
   }
 
   // Navigation: every page is a hash route, so links are shareable and the
   // browser's back button works.
-  function select(id) { location.hash = '#/loop/' + encodeURIComponent(id); }
+  function select(id) { location.hash = RL.loopHref(id); }
   function showView(name) {
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
-    $('#nav-home').classList.toggle('active', name === 'home' || name === 'loop');
-    $('#nav-config').classList.toggle('active', name === 'config');
-    $('#nav-start').classList.toggle('active', name === 'start');
+    for (const [nav, on] of [['#nav-home', name === 'home' || name === 'loop'], ['#nav-config', name === 'config'], ['#nav-start', name === 'start']]) {
+      $(nav).classList.toggle('active', on);
+      if (on) $(nav).setAttribute('aria-current', 'page'); else $(nav).removeAttribute('aria-current');
+    }
     document.title = name === 'config' ? 'Review loops · configuration' : name === 'start' ? 'Review loops · start a loop' : name === 'loop' && selected ? 'Review loop ' + selected : 'Review loops';
   }
   let cfgReady = false;
@@ -992,14 +1240,14 @@ if (typeof module !== 'undefined') module.exports = RL;
           ${r.coder_duration_s != null ? `<span class="chip neutral" title="${r.coder_time_underestimated ? 'a pause ended late: lower bound' : ''}"><i></i>coder ${r.coder_time_underestimated ? '≥ ' : ''}${fmtDur(r.coder_duration_s)}</span>` : ''}
           ${r.duration_s != null ? `<span class="chip neutral"><i></i>review ${fmtDur(r.duration_s)}</span>` : ''}</h3>
         <div class="pair">
-          <div class="doc"><div class="who">Coder</div><div class="md">${f.coder ? md(f.coder) : '<span class="empty">not written</span>'}</div></div>
-          <div class="doc"><div class="who">Reviewer</div><div class="md">${f.review ? md(f.review) : '<span class="empty">no review</span>'}</div></div>
+          <div class="doc" role="region" aria-label="Round ${f.round} coder"><div class="who">Coder</div><div class="md">${f.coder ? md(f.coder) : '<span class="empty">not written</span>'}</div></div>
+          <div class="doc" role="region" aria-label="Round ${f.round} reviewer"><div class="who">Reviewer</div><div class="md">${f.review ? md(f.review) : '<span class="empty">no review</span>'}</div></div>
         </div>
-        ${(r.coder || r.reviewer) ? `<table class="usage-table"><thead><tr><th>Agent</th><th class="num">Input</th><th class="num">Cached</th><th class="num">Cache write</th><th class="num">Output</th><th class="num">Reasoning</th><th class="num">Cost</th></tr></thead><tbody>${usageRows('coder (' + esc((r.coder || {}).model || '–') + ')', r.coder && { ...r.coder, any: true })}${usageRows('reviewer (' + esc((r.reviewer || {}).model || '–') + ')', r.reviewer && { ...r.reviewer, any: true })}</tbody></table>` : ''}
+        ${(r.coder || r.reviewer) ? `<div class="scroll-x"><table class="usage-table"><thead><tr><th>Agent</th><th class="num">Input</th><th class="num">Cached</th><th class="num">Cache write</th><th class="num">Output</th><th class="num">Reasoning</th><th class="num">Cost</th></tr></thead><tbody>${usageRows('coder (' + esc((r.coder || {}).model || '–') + ')', r.coder && { ...r.coder, any: true })}${usageRows('reviewer (' + esc((r.reviewer || {}).model || '–') + ')', r.reviewer && { ...r.reviewer, any: true })}</tbody></table></div>` : ''}
       </div>`;
     }).join('');
     d.innerHTML = `<div class="card">
-      <div class="detail-head"><h2>${esc(l.task)}</h2>${chip(l.outcome)}<span class="spacer"></span><a class="navbtn" href="#/">All loops</a></div>
+      <div class="detail-head"><h2>${esc(l.task)}</h2>${chip(l.outcome)}</div>
       <div class="kv"><span>id <b class="mono">${esc(l.id)}</b></span><span>backend <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}${l.st.effort ? ' @ ' + esc(l.st.effort) : ''}</b></span>
         <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b>${l.extendedRounds ? ` <span class="src">(extended +${l.extendedRounds})</span>` : ''}</span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
         ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
@@ -1007,11 +1255,22 @@ if (typeof module !== 'undefined') module.exports = RL;
         ${l.usage ? `<span>cost <b>${fmtCost(l.cost)}</b></span>` : ''}<span>dir <b class="mono">${esc(l.dir)}</b></span>
         ${l.st.prompts ? `<span>reviewer prompt <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'reviewer'))}</b></span><span>coder brief <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'coder'))}</b></span>` : ''}</div>
       ${roundsHtml || '<div class="empty">No rounds yet.</div>'}
-      ${l.summary ? `<div class="round"><h3>Summary</h3><div class="doc"><div class="md">${md(l.summary)}</div></div></div>` : ''}
+      ${l.summary ? `<div class="round"><h3>Summary</h3><div class="doc" role="region" aria-label="Loop summary"><div class="md">${md(l.summary)}</div></div></div>` : ''}
     </div>`;
+    // A pane that scrolls must be reachable by keyboard to scroll it.
+    d.querySelectorAll('.doc').forEach(p => { if (p.scrollHeight > p.clientHeight + 1 || p.scrollWidth > p.clientWidth + 1) p.tabIndex = 0; });
   }
 
-  window.addEventListener('hashchange', route);
+  // After navigating, move focus to the new page so keyboard and screen-reader
+  // users start there (not on the first load or a theme switch).
+  // Charts are drawn at the card width: redraw them when the width changes.
+  let drawnWidth = innerWidth;
+  window.addEventListener('resize', () => {
+    if (Math.abs(innerWidth - drawnWidth) < 40) return;
+    drawnWidth = innerWidth;
+    if ($('#view-home').classList.contains('active')) render();
+  });
+  window.addEventListener('hashchange', () => { route(); const v = document.querySelector('.view.active'); if (v) v.focus({ preventScroll: true }); });
   route();
 })();
 </script>

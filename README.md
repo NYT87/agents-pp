@@ -134,6 +134,26 @@ A replacement reviewer template must still end with the required output format (
 
 ### Verdict rules
 
+New loops freeze `protocol_version: 2` in state. They validate unique consecutive
+finding IDs, required finding fields, and exactly one disposition for every
+earlier finding, including Optional items. Missing, unknown or duplicate IDs and
+invalid statuses cannot silently clear a blocker. `changes_requested` needs a
+blocking finding or unresolved earlier ID, and the review must finish with its
+`VERDICT:` line. Fenced examples do not count as findings or blocking items.
+
+Before spending a reviewer call, the loop also validates the coder's response
+table: one `fixed` or `declined` row, with an explanation, for every finding
+introduced in the preceding review and every older unresolved or
+declined-rejected ID. Fix invalid summaries and rerun the same round; invalid
+reviewer output is retained as `.invalid.md` without installing a review or
+advancing. These checks enforce accountability and structure; the reviewer still
+judges whether a fix or decline is correct.
+
+Existing loops without a protocol version (or with version 1) retain legacy
+validation, including when continued. Pending installed reviews resume their
+transition without requiring a coder summary or invoking the reviewer again.
+Replacement prompts for new loops must follow the same strict format.
+
 - A review ends with `VERDICT: approved` or `VERDICT: changes_requested`.
 - `approved` is only valid with zero blocking items: no `blocking: yes` comment, and no earlier comment left `unresolved` or `declined-rejected`. If the reviewer says `approved` but lists a blocking item, `review.sh` downgrades the verdict to `changes_requested`.
 - Non-blocking nits go under "Optional" and never hold up approval.
@@ -181,12 +201,29 @@ Generates a self-contained `dashboard.html` (default: inside the storage dir) fr
 
 #### Editing the configuration from the dashboard
 
+Model and effort are dropdowns on both Configuration and Start a loop. Effort
+choices follow the selected model; an existing unlisted value stays visible as
+"not listed". On a served page, **Refresh available options** re-reads the
+backend catalogs, saves them beside the selected config, and updates both forms without clearing pending edits. Codex
+options come from its CLI model cache: if that cache is missing, run Codex once
+and refresh. The button does not launch or authenticate a CLI.
+
+On a static page, **Copy catalog command** provides the command to export the
+selected backend's options beside the configuration file as
+`review-loop-models.<backend>.json`. Regenerating the page reads saved catalogs
+automatically; **Load model catalog…** can also load the saved JSON or an updated
+dashboard HTML file immediately. A static browser page cannot execute local CLI commands. When no
+catalog is available, the dropdowns retain the backend default and any current
+value. Custom names can still be set through `config.sh` or CLI flags.
+
 The Configuration page (header button, or `#/config`) shows every setting with its effective value and where it comes from (the same information as `config.sh show`), in three groups: **Loop**, **Dashboard** and **Agent roles**. The roles group has one card per agent (reviewer, coder) saying what it runs with — the default template or the configured replacement, plus the extra file appended to it — and flags a configured file that is missing or unreadable (the loop would not start). Each card unfolds the default template with the `{{placeholders}}` a replacement may use. A loop's page shows which prompts that loop ran with (they are frozen in its `state.json`). Edit values, pick where to write (project or user shared file, a provider section, or a provider file), and then:
 
-- **Static page** (the default): the panel shows the exact `config.sh` command for your changes (copy it), or saves the file through the browser. In Chromium browsers the file picker re-reads the chosen file and merges your changes into it without touching anything else (number literals included); elsewhere only a new file can be downloaded, and existing files are edited through the command. Nothing is written until you run the command or save the file.
+- **Static page** (the default): the panel shows the exact `config.sh` command for your changes (copy it), or saves the file through the browser. In Chromium browsers the file picker re-reads the chosen file and merges your changes into it without touching anything else (number literals included); elsewhere only a new file can be downloaded, and existing files are edited through the command. Use **Enable auto-save…** to choose the configuration file once; subsequent valid edits save automatically, merging into its current contents each time. Browsers without file access retain the download and command options.
 - **Sharing**: a static page carries only project-level configuration. Your user files (`~/.config/review-loop/config.json`, `~/.<provider>/review-loop.json`) are listed without contents, effective values from those files or environment overrides are hidden, and so are the backends' default model and effort (they come from your own tool configuration, e.g. `~/.codex/config.toml`; the model lists themselves stay), so the page can be committed or published; pass `--with-user-config` to embed them in a page you keep private.
 - **Starting a loop from the page**: the "Start a loop" page (header button, or `#/start`) takes the task and the backend, model, effort, max rounds and usage (prefilled from the configuration; model and effort offered from the backend's catalog). Only what differs from the configuration is passed to `start.sh` (choosing "backend default" for a configured model or effort is passed as an explicit empty flag, which overrides the configuration). On a served page the Start button creates the loop through `start.sh` (`/api/start`, validated fields, the task passed after `--`, no shell) and then says what comes next — open Claude Code in the project and send any message; the Stop hook holds that session to the task until the reviewer approves — before opening the new loop's page. A static page shows the equivalent `start.sh` command to copy. An active loop of this project must be cancelled first, as on the command line (another project's loop in a shared storage dir does not block it).
-- **Served page**: `dashboard.sh --serve [--port 8765]` (needs `python3`) serves the dashboard on `127.0.0.1` only and adds an Apply button that writes through `config.sh`, so all validation, masking warnings and provider rules apply, and the page reloads with fresh data. Requests (`/api/config`, `/api/start`) must carry the per-run token embedded in the page, keys, provider and backend names are validated before anything runs, and no shell is involved. The served page (token and user configuration included) lives in a private temp file that is deleted when the server stops; the configured output file keeps the redacted, shareable page. The server runs until Ctrl-C. Flags override the config; `REVIEW_LOOP_DASHBOARD_OPEN=0` and `REVIEW_LOOP_DASHBOARD_OUT` override it from the environment. No server, no network: the loop data is embedded in the page. The main page shows stat tiles (loops, approval rate, average rounds, tokens and cost when usage tracking is on), a rounds-per-loop chart with the cap marked, time and output-token charts split by coder and reviewer, and a filterable table. A loop's page shows its full comment trail round by round: coder summary beside the review, verdict, blocking count, usage, and the final summary. It follows the system light/dark setting and has a theme toggle.
+- **Served page**: `dashboard.sh --serve [--port 8765]` (needs `python3`) serves the dashboard on `127.0.0.1` only and automatically saves valid configuration edits through `config.sh`, so validation, masking warnings and provider rules apply. Saves are debounced and serialized, show saving/saved/error status, and preserve newer edits without reloading the page; **Save now / retry** retries a failed save. Requests (`/api/config`, `/api/start`, `/api/models`) must carry the per-run token embedded in the page, keys, provider and backend names are validated before anything runs, and no shell is involved. The served page (token and user configuration included) lives in a private temp file that is deleted when the server stops; the configured output file keeps the redacted, shareable page. The server runs until Ctrl-C. Flags override the config; `REVIEW_LOOP_DASHBOARD_OPEN=0` and `REVIEW_LOOP_DASHBOARD_OUT` override it from the environment. No server, no network: the loop data is embedded in the page. The main page shows stat tiles (loops, approval rate, average rounds, tokens and cost when usage tracking is on), a rounds-per-loop chart with the cap marked, time and output-token charts split by coder and reviewer, and a filterable table. A loop's page shows its full comment trail round by round: coder summary beside the review, verdict, blocking count, usage, and the final summary. It follows the system light/dark setting and has a theme toggle.
+
+The local request and response contract is documented in [Dashboard API](docs/dashboard-api.md).
 
 ## Configuration
 
@@ -270,8 +307,10 @@ Environment available to backends: `REVIEW_LOOP_MODEL`, `REVIEW_LOOP_EFFORT`, `R
 ### Models and effort
 
 ```
-bash $CFG models                    # the effective backend's models and efforts
-bash $CFG models --backend claude   # another backend's
+bash $CFG models                    # refresh and save beside the active configuration
+bash $CFG models --backend claude   # refresh another backend
+bash $CFG models --user            # save beside the user shared config
+bash $CFG models --json --no-save  # read-only JSON, no catalog file written
 bash $CFG set model=gpt-6.1-sol effort=high
 /review-loop ... --model opus --effort xhigh
 ```

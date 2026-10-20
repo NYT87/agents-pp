@@ -18,6 +18,7 @@
 # with an empty list, i.e. unknown capabilities); with
 # REVIEW_LOOP_FAKE_ENV_FILE set, a run records the model and effort it got.
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib.sh"
 
 if [ "${1:-}" = "--models" ]; then
   jq -cn '{backend: "fake", source: "built in",
@@ -32,7 +33,6 @@ PROMPT_FILE="$1"
 OUTPUT_FILE="$2"
 [ -n "${REVIEW_LOOP_FAKE_ENV_FILE:-}" ] && printf 'MODEL=%s\nEFFORT=%s\n' "${REVIEW_LOOP_MODEL:-}" "${REVIEW_LOOP_EFFORT:-}" > "$REVIEW_LOOP_FAKE_ENV_FILE"
 ROUND="${REVIEW_LOOP_ROUND:-1}"
-PREV=$(( ROUND - 1 ))
 
 # Test clock: advance REVIEW_LOOP_FAKE_CLOCK by REVIEW_LOOP_FAKE_TAKES seconds so
 # an attempt has a measurable duration without sleeping.
@@ -52,13 +52,17 @@ prev_section() {
   if [ "$ROUND" -gt 1 ]; then
     echo "## Previous comments"
     echo
-    echo "- R${PREV}-C1: $1"
+    local id
+    while IFS= read -r id; do
+      printf -- '- %s: %s\n' "$id" "$1"
+    done < <(rl_review_history "$REVIEW_LOOP_LOOP_DIR" "$ROUND" | jq -r '.ids[]')
     echo
   fi
 }
 
 TMP="$OUTPUT_FILE.tmp"
 case "$MODE" in
+  custom) cp "$REVIEW_LOOP_FAKE_REVIEW_FILE" "$TMP" ;;
   approved)
     {
       prev_section resolved
