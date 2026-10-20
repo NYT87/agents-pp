@@ -5,9 +5,13 @@
 #   Runs a one-shot, read-only Claude Code session in the current directory and
 #   writes its final message to OUTPUT_FILE (only on success) plus token usage
 #   and cost to OUTPUT_FILE.usage.json when REVIEW_LOOP_USAGE=1.
+# Contract: claude.sh --models
+#   Prints the models (aliases and full names) and effort levels Claude Code
+#   accepts, as JSON (see README "Reviewer backends").
 # Env:
 #   REVIEW_LOOP_MODEL         model passed as `--model` (empty = default).
 #                             A stronger model than the coder is a good choice.
+#   REVIEW_LOOP_EFFORT        effort level passed as `--effort` (empty = default).
 #   REVIEW_LOOP_CLAUDE_FLAGS  extra flags appended to the command line.
 #
 # Isolation: `--setting-sources user` skips the project's hooks and settings,
@@ -15,6 +19,25 @@
 # one), and REVIEW_LOOP_NESTED=1 (exported by review.sh) makes the review-loop
 # Stop hook a no-op inside the nested session.
 set -euo pipefail
+
+if [ "${1:-}" = "--models" ]; then
+  # Claude Code has no list command: these are the aliases it documents for
+  # `--model` and the levels it documents for `--effort`.
+  jq -cn '{backend: "claude", source: "claude --help",
+    models: [
+      {id: "fable",  label: "Fable (latest, alias)",  efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false},
+      {id: "opus",   label: "Opus (latest, alias)",   efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false},
+      {id: "sonnet", label: "Sonnet (latest, alias)", efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false},
+      {id: "haiku",  label: "Haiku (latest, alias)",  efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false},
+      {id: "claude-fable-5-1",  label: "Claude Fable 5.1",  efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false},
+      {id: "claude-opus-5-5",   label: "Claude Opus 5.5",   efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false},
+      {id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false},
+      {id: "claude-haiku-5-5",  label: "Claude Haiku 5.5",  efforts: ["low","medium","high","xhigh","max"], default_effort: null, default: false}],
+    efforts: ["low","medium","high","xhigh","max"], default_model: null, default_effort: null,
+    note: "empty = the session default of the claude CLI; a full model name is passed through as given"}'
+  exit 0
+fi
+
 PROMPT_FILE="$1"
 OUTPUT_FILE="$2"
 
@@ -26,6 +49,7 @@ command -v claude > /dev/null 2>&1 || {
 args=(-p --output-format json --setting-sources user --disable-slash-commands
       --no-session-persistence --permission-mode dontAsk)
 [ -n "${REVIEW_LOOP_MODEL:-}" ] && args+=(--model "$REVIEW_LOOP_MODEL")
+[ -n "${REVIEW_LOOP_EFFORT:-}" ] && args+=(--effort "$REVIEW_LOOP_EFFORT")
 # shellcheck disable=SC2206
 extra=(${REVIEW_LOOP_CLAUDE_FLAGS:-})
 # --allowedTools is variadic, so it goes last.

@@ -116,6 +116,13 @@ done < <(sort -t "$(printf '\t')" -k1,1 -u -s "$CANDIDATES")
 # what each role runs with and which {{placeholders}} a replacement may use.
 (cd "$ROOT" && bash "$RL_SCRIPTS_DIR/config.sh" show --json) > "$WORK/config-show.json" 2>/dev/null || echo 'null' > "$WORK/config-show.json"
 bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/null || echo '{"keys":[],"backends":[]}' > "$WORK/config-keys.json"
+# Each backend's model catalog, so the page can offer models and efforts.
+echo '{}' > "$WORK/models.json"
+while IFS= read -r b; do
+  [ -n "$b" ] || continue
+  m=$(rl_backend_models "$b")
+  jq -c --arg b "$b" --argjson m "$m" '. + {($b): $m}' "$WORK/models.json" > "$WORK/models.tmp" && mv "$WORK/models.tmp" "$WORK/models.json"
+done < <(jq -r '.backends[]?' "$WORK/config-keys.json")
 # Every existing per-provider file (any provider), so the page can merge edits
 # into a file other than the running provider's instead of overwriting it.
 : > "$WORK/provider-files.jsonl"
@@ -142,14 +149,19 @@ if [ "$WITH_USER" = "0" ] && [ -z "$SERVE_TOKEN" ]; then
           | if (.prompt_files // {}) | has($e.key) then .prompt_files[$e.key] = null else . end)
     | .redacted_user_config = true end' "$WORK/config-show.json" > "$WORK/config-show.tmp" && mv "$WORK/config-show.tmp" "$WORK/config-show.json"
   jq -c 'map(select(.scope == "project"))' "$WORK/provider-files.json" > "$WORK/pf.tmp" && mv "$WORK/pf.tmp" "$WORK/provider-files.json"
+  # The catalogs' defaults and "default" markers come from the user's own
+  # tool configuration (e.g. ~/.codex/config.toml): hidden too. The model
+  # lists themselves are the tools' public catalogs and stay.
+  jq -c 'map_values(.default_model = null | .default_effort = null | .redacted_defaults = true
+                    | .models |= map(if type == "object" then .default = false else . end))' "$WORK/models.json" > "$WORK/models.tmp" && mv "$WORK/models.tmp" "$WORK/models.json"
 fi
 jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" --arg script "$RL_SCRIPTS_DIR/config.sh" --arg token "$SERVE_TOKEN" \
-  --slurpfile show "$WORK/config-show.json" --slurpfile keys "$WORK/config-keys.json" --slurpfile pf "$WORK/provider-files.json" \
+  --slurpfile show "$WORK/config-show.json" --slurpfile keys "$WORK/config-keys.json" --slurpfile pf "$WORK/provider-files.json" --slurpfile models "$WORK/models.json" \
   --arg home "$HOME" --arg ucfg "$(rl_user_config_dir)/config.json" \
   --rawfile rtpl "$RL_TEMPLATES_DIR/reviewer-prompt.md" --rawfile ctpl "$RL_TEMPLATES_DIR/coder-brief.md" \
   '{generated_at: $t, root: $root, loops: (sort_by([.state.started_at, .state.loop_id]) | reverse),
     config: {show: $show[0], keys: $keys[0].keys, backends: $keys[0].backends, script: $script,
-             provider_files: $pf[0], home: $home, user_shared: $ucfg},
+             provider_files: $pf[0], home: $home, user_shared: $ucfg, models: $models[0]},
     templates: {reviewer: $rtpl, coder: $ctpl},
     serve: (if $token == "" then null else {token: $token} end)}' \
   "$LOOPS_FILE" | sed 's|</|<\\/|g' > "$WORK/data.json"

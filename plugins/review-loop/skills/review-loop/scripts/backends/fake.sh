@@ -14,9 +14,23 @@
 #   partial                writes OUTPUT_FILE then exits 1
 # Missing file or empty line -> approved.
 # Writes OUTPUT_FILE.usage.json with fixed numbers when REVIEW_LOOP_USAGE=1.
+# `fake.sh --models` prints a fixed catalog (three models: two with levels, one
+# with an empty list, i.e. unknown capabilities); with
+# REVIEW_LOOP_FAKE_ENV_FILE set, a run records the model and effort it got.
 set -euo pipefail
+
+if [ "${1:-}" = "--models" ]; then
+  jq -cn '{backend: "fake", source: "built in",
+    models: [{id: "fake-fast",    label: "Fake fast",    efforts: ["low","high"],       default_effort: "low",  default: true},
+             {id: "fake-smart",   label: "Fake smart",   efforts: ["low","high","max"], default_effort: "high", default: false},
+             {id: "fake-mystery", label: "Fake mystery", efforts: [],                   default_effort: null,   default: false}],
+    efforts: ["low","high","max"], default_model: "fake-fast", default_effort: "low"}'
+  exit 0
+fi
+
 PROMPT_FILE="$1"
 OUTPUT_FILE="$2"
+[ -n "${REVIEW_LOOP_FAKE_ENV_FILE:-}" ] && printf 'MODEL=%s\nEFFORT=%s\n' "${REVIEW_LOOP_MODEL:-}" "${REVIEW_LOOP_EFFORT:-}" > "$REVIEW_LOOP_FAKE_ENV_FILE"
 ROUND="${REVIEW_LOOP_ROUND:-1}"
 PREV=$(( ROUND - 1 ))
 

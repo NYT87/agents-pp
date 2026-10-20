@@ -28,7 +28,9 @@ arguments, pass them through unchanged):
 bash ${CLAUDE_SKILL_DIR}/scripts/start.sh --session ${CLAUDE_SESSION_ID} $ARGUMENTS
 ```
 
-(`--session` identifies your session as the loop owner and, when the user
+(The user's arguments may include `--backend`, `--model`, `--effort`,
+`--max-rounds`, `--usage` and the prompt flags; `config.sh models` lists the
+models and efforts a backend offers. `--session` identifies your session as the loop owner and, when the user
 enables `--usage`, lets the loop record your token usage; keep it as is.)
 
 It prints the loop id, the loop directory, the task file and **your brief**

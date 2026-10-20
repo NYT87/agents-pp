@@ -51,7 +51,8 @@ effective value in each question** and offering it as the first option:
 | Key | Ask | Options |
 |---|---|---|
 | `backend` | reviewer backend | `codex`, `claude` (and any other script in `scripts/backends/`) |
-| `model` | reviewer model | keep current / backend default / type a model name |
+| `model` | reviewer model | keep current / backend default / one of the backend's listed models (see below) / type a model name |
+| `effort` | reasoning effort for the reviewer | keep current / backend default / one of the backend's listed efforts |
 | `max_rounds` | review rounds before giving up | current, 3, 5, 10, or a number |
 | `dir` | where loop folders are stored | current, `.review-loop`, `reviews`, `docs/reviews`, or a path |
 | `usage` | record token usage and cost per round | yes / no |
@@ -61,6 +62,23 @@ effective value in each question** and offering it as the first option:
 
 Skip `dashboard.dirs` unless the user mentions several storage folders; then
 ask for a comma-separated list.
+
+For `model` and `effort`, list what the chosen backend offers (the one the
+user picked for `backend`, or the effective one) and let the user pick from
+it:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh models --backend <backend> --json
+```
+
+`models[]` has `id`, `label`, `efforts` and `default`; `efforts` is the list
+of levels the backend accepts and `default_model`/`default_effort` what it
+uses when the keys are empty. Offer the models by label (id in parentheses)
+with "backend default" first; a name that is not listed is accepted for
+`model` (new models appear before lists do) but `effort` must be one of the
+levels listed for the chosen model (`models[].efforts`; for an unlisted model,
+the backend-wide `efforts`). When the lists are empty (Codex before its first
+run, say), say so and accept typed values.
 
 ## 3. Write the values
 

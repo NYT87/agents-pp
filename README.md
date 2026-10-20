@@ -77,7 +77,7 @@ The second hook only records when a paused loop resumes (so the coder time of a 
 
 ```
 /review-loop Add a divide() function with ValueError on zero, plus tests
-/review-loop Refactor the auth middleware --backend claude --model opus --max-rounds 3 --usage
+/review-loop Refactor the auth middleware --backend claude --model opus --effort high --max-rounds 3 --usage
 /review-status
 /review-cancel
 /review-continue 2          # the loop hit its cap: allow 2 more rounds and carry on
@@ -184,7 +184,7 @@ Generates a self-contained `dashboard.html` (default: inside the storage dir) fr
 The Configuration page (header button, or `#/config`) shows every setting with its effective value and where it comes from (the same information as `config.sh show`), in three groups: **Loop**, **Dashboard** and **Agent roles**. The roles group has one card per agent (reviewer, coder) saying what it runs with — the default template or the configured replacement, plus the extra file appended to it — and flags a configured file that is missing or unreadable (the loop would not start). Each card unfolds the default template with the `{{placeholders}}` a replacement may use. A loop's page shows which prompts that loop ran with (they are frozen in its `state.json`). Edit values, pick where to write (project or user shared file, a provider section, or a provider file), and then:
 
 - **Static page** (the default): the panel shows the exact `config.sh` command for your changes (copy it), or saves the file through the browser. In Chromium browsers the file picker re-reads the chosen file and merges your changes into it without touching anything else (number literals included); elsewhere only a new file can be downloaded, and existing files are edited through the command. Nothing is written until you run the command or save the file.
-- **Sharing**: a static page carries only project-level configuration. Your user files (`~/.config/review-loop/config.json`, `~/.<provider>/review-loop.json`) are listed without contents, and effective values from those files or environment overrides are hidden, so the page can be committed or published; pass `--with-user-config` to embed them in a page you keep private.
+- **Sharing**: a static page carries only project-level configuration. Your user files (`~/.config/review-loop/config.json`, `~/.<provider>/review-loop.json`) are listed without contents, effective values from those files or environment overrides are hidden, and so are the backends' default model and effort (they come from your own tool configuration, e.g. `~/.codex/config.toml`; the model lists themselves stay), so the page can be committed or published; pass `--with-user-config` to embed them in a page you keep private.
 - **Served page**: `dashboard.sh --serve [--port 8765]` (needs `python3`) serves the dashboard on `127.0.0.1` only and adds an Apply button that writes through `config.sh`, so all validation, masking warnings and provider rules apply, and the page reloads with fresh data. Requests must carry the per-run token embedded in the page, keys and provider names are validated before anything runs, and no shell is involved. The served page (token and user configuration included) lives in a private temp file that is deleted when the server stops; the configured output file keeps the redacted, shareable page. The server runs until Ctrl-C. Flags override the config; `REVIEW_LOOP_DASHBOARD_OPEN=0` and `REVIEW_LOOP_DASHBOARD_OUT` override it from the environment. No server, no network: the loop data is embedded in the page. The main page shows stat tiles (loops, approval rate, average rounds, tokens and cost when usage tracking is on), a rounds-per-loop chart with the cap marked, time and output-token charts split by coder and reviewer, and a filterable table. A loop's page shows its full comment trail round by round: coder summary beside the review, verdict, blocking count, usage, and the final summary. It follows the system light/dark setting and has a theme toggle.
 
 ## Configuration
@@ -217,7 +217,7 @@ It shows the current value of every setting and where it comes from, asks what t
 CFG=plugins/review-loop/skills/review-loop/scripts/config.sh   # path inside this repo
 bash $CFG show                                   # effective value, source and default per key, files found
 bash $CFG create                                 # empty project file, everything inherited
-bash $CFG set backend=claude model=opus max_rounds=3 usage=true
+bash $CFG set backend=claude model=opus effort=high max_rounds=3 usage=true
 bash $CFG set --provider codex max_rounds=3      # providers.codex section of ./.review-loop.json
 bash $CFG set --provider-file claude model=opus  # ./.claude/review-loop.json
 bash $CFG set --user dir=reviews dashboard.auto=true
@@ -232,7 +232,8 @@ With `dir` set to the project root (`.`), `gitignore` writes a pattern matching 
 | Setting | Flag | Env | Config key | Default |
 |---|---|---|---|---|
 | Reviewer backend | `--backend` | `REVIEW_LOOP_BACKEND` | `backend` | `codex` |
-| Reviewer model | `--model` | `REVIEW_LOOP_MODEL` | `model` | backend default |
+| Reviewer model | `--model` | `REVIEW_LOOP_MODEL` | `model` | backend default (list: `config.sh models`) |
+| Reviewer effort | `--effort` | `REVIEW_LOOP_EFFORT` | `effort` | backend default (one of the chosen model's listed levels) |
 | Max review rounds | `--max-rounds` | `REVIEW_LOOP_MAX_ROUNDS` | `max_rounds` | `5` (1 to 9007199254740991) |
 | Storage dir | `--dir` | `REVIEW_LOOP_DIR` | `dir` | `.review-loop` |
 | Usage tracking | `--usage` / `--no-usage` | `REVIEW_LOOP_USAGE` | `usage` | `false` |
@@ -261,14 +262,27 @@ A backend is a script `scripts/backends/<name>.sh PROMPT_FILE OUTPUT_FILE` that:
 3. exits non-zero on failure, in which case nothing is installed and `review.sh` asks for a rerun;
 4. when `REVIEW_LOOP_USAGE=1`, optionally writes `OUTPUT_FILE.usage.json` with `{model, input_tokens (uncached), cached_input_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd|null, num_turns|null}`; missing fields default to zero.
 
-Environment available to backends: `REVIEW_LOOP_MODEL`, `REVIEW_LOOP_ROUND`, `REVIEW_LOOP_LOOP_DIR`, `REVIEW_LOOP_ROOT`, and `REVIEW_LOOP_NESTED=1` (so a nested Claude session does not trigger the Stop hook).
+Environment available to backends: `REVIEW_LOOP_MODEL`, `REVIEW_LOOP_EFFORT`, `REVIEW_LOOP_ROUND`, `REVIEW_LOOP_LOOP_DIR`, `REVIEW_LOOP_ROOT`, and `REVIEW_LOOP_NESTED=1` (so a nested Claude session does not trigger the Stop hook).
+
+5. optionally answers `<name>.sh --models` with its catalog as JSON: `{models: [{id, label, efforts, default_effort, default}], efforts, default_model, default_effort, source, note}`. `config.sh models [--backend NAME]`, the `/review-config` wizard and the dashboard's configuration page use it to offer models and efforts; an `effort` is validated against the chosen model's `efforts` when that model is listed (its list taken as is: an empty one means that model's capabilities are unknown and any value is accepted), else against the backend-wide `efforts` (an empty one likewise accepts anything), `model` values outside `models` only get a note. A backend without `--models` simply offers no list.
+
+### Models and effort
+
+```
+bash $CFG models                    # the effective backend's models and efforts
+bash $CFG models --backend claude   # another backend's
+bash $CFG set model=gpt-6.1-sol effort=high
+/review-loop ... --model opus --effort xhigh
+```
+
+`codex` reads the model list Codex itself fetched (`~/.codex/models_cache.json`: listed models in Codex's order, their reasoning levels, and the `model` / `model_reasoning_effort` defaults from `~/.codex/config.toml`); the effort is passed as `-c model_reasoning_effort="…"`. `claude` offers the aliases Claude Code documents (`fable`, `opus`, `sonnet`, `haiku`) and the current full names, with efforts `low`…`max`, passed as `--effort`. The chosen model and effort are frozen in the loop's `state.json` and shown by `/review-status`, the review files' front matter and the dashboard.
 
 Shipped backends:
 
 | Backend | Command | Notes |
 |---|---|---|
-| `codex` (default) | `codex exec -s read-only --ephemeral --skip-git-repo-check -o <out> -` | Verified with codex-cli 0.162. With usage tracking on it adds `--json` and turns the events into progress lines and token usage. |
-| `claude` | `claude -p --output-format json --setting-sources user --disable-slash-commands --no-session-persistence --permission-mode dontAsk --allowedTools "Read,Glob,Grep,Bash(git diff*),..."` | Verified with Claude Code 2.1.292. Pick a stronger reviewer with `--model`. |
+| `codex` (default) | `codex exec -s read-only --ephemeral --skip-git-repo-check [-m MODEL] [-c model_reasoning_effort="LEVEL"] -o <out> -` | Verified with codex-cli 0.162. With usage tracking on it adds `--json` and turns the events into progress lines and token usage. |
+| `claude` | `claude -p --output-format json --setting-sources user --disable-slash-commands --no-session-persistence --permission-mode dontAsk [--model MODEL] [--effort LEVEL] --allowedTools "Read,Glob,Grep,Bash(git diff*),..."` | Verified with Claude Code 2.1.292. Pick a stronger reviewer with `--model`, more thinking with `--effort`. |
 | `fake` | deterministic verdicts | Used by the test suite. |
 
 To add one (OpenCode, for example), copy `claude.sh`, adapt the command, and select it with `--backend opencode`.

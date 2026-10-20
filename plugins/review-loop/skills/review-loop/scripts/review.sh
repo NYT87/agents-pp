@@ -21,6 +21,7 @@ ROUND=$(rl_state_get "$RL_LOOP_DIR" round)
 MAX_ROUNDS=$(rl_state_get "$RL_LOOP_DIR" max_rounds)
 BACKEND=$(rl_state_get "$RL_LOOP_DIR" backend)
 MODEL=$(rl_state_get "$RL_LOOP_DIR" model)
+EFFORT=$(rl_state_get "$RL_LOOP_DIR" effort)
 BASE_REF=$(rl_state_get "$RL_LOOP_DIR" base_ref)
 DIR=$(rl_state_get "$RL_LOOP_DIR" dir)
 NN=$(rl_round_nn "$ROUND")
@@ -224,11 +225,11 @@ CODER_S=$(rl_round_coder_seconds "$RL_LOOP_DIR") || CODER_S=""
 rl_log "$RL_LOOP_DIR" "review.sh: round $ROUND coder time ${CODER_S:-unknown}s"
 
 # ── Run the backend ──────────────────────────────────────────────────────────
-echo "review-loop: round $ROUND/$MAX_ROUNDS — coder worked $([ "$UNDERESTIMATED" = true ] && printf 'at least ')$(rl_fmt_dur "$CODER_S"); running reviewer backend '$BACKEND'${MODEL:+ (model: $MODEL)}"
-rl_log "$RL_LOOP_DIR" "review.sh: round $ROUND backend=$BACKEND model=${MODEL:-default} start"
+echo "review-loop: round $ROUND/$MAX_ROUNDS — coder worked $([ "$UNDERESTIMATED" = true ] && printf 'at least ')$(rl_fmt_dur "$CODER_S"); running reviewer backend '$BACKEND'${MODEL:+ (model: $MODEL)}${EFFORT:+ (effort: $EFFORT)}"
+rl_log "$RL_LOOP_DIR" "review.sh: round $ROUND backend=$BACKEND model=${MODEL:-default} effort=${EFFORT:-default} start"
 START=$(rl_epoch)
 set +e
-REVIEW_LOOP_NESTED=1 REVIEW_LOOP_MODEL="$MODEL" REVIEW_LOOP_ROUND="$ROUND" REVIEW_LOOP_USAGE="$USAGE_ON" \
+REVIEW_LOOP_NESTED=1 REVIEW_LOOP_MODEL="$MODEL" REVIEW_LOOP_EFFORT="$EFFORT" REVIEW_LOOP_ROUND="$ROUND" REVIEW_LOOP_USAGE="$USAGE_ON" \
   REVIEW_LOOP_LOOP_DIR="$RL_LOOP_DIR" REVIEW_LOOP_ROOT="$RL_ROOT" \
   bash "$BACKEND_SCRIPT" "$PROMPT_FILE" "$RAW_FILE"
 RC=$?
@@ -324,6 +325,7 @@ if ! {
     echo "round: $ROUND"
     echo "backend: $BACKEND"
     echo "model: ${MODEL:-default}"
+    echo "effort: ${EFFORT:-default}"
     echo "blocking: $BLOCKING"
     echo "generated_at: $(rl_now)"
     echo "---"

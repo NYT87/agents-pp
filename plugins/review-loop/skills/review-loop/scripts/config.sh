@@ -10,6 +10,8 @@
 #                                                 model / dashboard.out / dashboard.dirs)
 #   config.sh gitignore [--dry-run]               add the loop's paths to .gitignore
 #   config.sh keys [--json]                       list keys with types and descriptions
+#   config.sh models [--backend NAME] [--json]    the models and reasoning efforts a backend
+#                                                 offers (default: the effective backend)
 #
 # Scope (which file, and where inside it):
 #   --project                ./.review-loop.json, shared by every provider      (default)
@@ -25,7 +27,8 @@
 #
 # Keys:
 #   backend         reviewer backend (a script in scripts/backends/)   string
-#   model           model passed to the backend ("" = backend default) string
+#   model           model passed to the backend ("" = backend default) string (see: models)
+#   effort          reasoning effort passed to the backend ("" = default) string (see: models)
 #   max_rounds      review rounds before the loop gives up             integer >= 1
 #   dir             storage dir for loop folders                        string
 #   usage           record token usage per round                        boolean
@@ -43,10 +46,10 @@ set -euo pipefail
 
 command -v jq > /dev/null 2>&1 || rl_die "'jq' is required"
 
-KEYS="backend model max_rounds dir usage dashboard.dirs dashboard.out dashboard.open dashboard.auto prompts.reviewer prompts.reviewer_extra prompts.coder prompts.coder_extra"
+KEYS="backend model effort max_rounds dir usage dashboard.dirs dashboard.out dashboard.open dashboard.auto prompts.reviewer prompts.reviewer_extra prompts.coder prompts.coder_extra"
 key_type() {
   case "$1" in
-    backend|model|dir|dashboard.out|prompts.reviewer|prompts.reviewer_extra|prompts.coder|prompts.coder_extra) echo string ;;
+    backend|model|effort|dir|dashboard.out|prompts.reviewer|prompts.reviewer_extra|prompts.coder|prompts.coder_extra) echo string ;;
     max_rounds) echo integer ;;
     usage|dashboard.open|dashboard.auto) echo boolean ;;
     dashboard.dirs) echo list ;;
@@ -54,12 +57,13 @@ key_type() {
   esac
 }
 # Keys that may legitimately be empty; the wizard clears them with "-".
-key_clearable() { case "$1" in model|dashboard.out|dashboard.dirs|prompts.*) return 0 ;; *) return 1 ;; esac; }
+key_clearable() { case "$1" in model|effort|dashboard.out|dashboard.dirs|prompts.*) return 0 ;; *) return 1 ;; esac; }
 
 key_help() {
   case "$1" in
     backend) echo "reviewer backend ($(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | tr '\n' ' ' | sed 's/ $//'))" ;;
-    model) echo "model passed to the backend (empty = backend default)" ;;
+    model) echo "model passed to the backend (empty = backend default; list: config.sh models)" ;;
+    effort) echo "reasoning effort passed to the backend (empty = backend default; list: config.sh models)" ;;
     max_rounds) echo "review rounds before the loop gives up" ;;
     dir) echo "storage dir for loop folders" ;;
     usage) echo "record token usage and cost per round" ;;
@@ -74,11 +78,11 @@ key_help() {
   esac
 }
 
-usage() { sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 CMD="${1:-}"; [ $# -gt 0 ] && shift
-SCOPE=project JSON=0 YES=0 DRY=0 MODE=shared PNAME="" EXPLICIT=0
+SCOPE=project JSON=0 YES=0 DRY=0 MODE=shared PNAME="" EXPLICIT=0 MODELS_BACKEND=""
 ARGS=()
 # Provider names are validated as whole strings by rl_valid_provider_name (lib.sh):
 # a letter or digit followed by letters, digits, "_" or "-". Nothing starting with
@@ -91,7 +95,7 @@ take_name() { # optional NAME after --provider / --provider-file
   [ $# -gt 1 ] || return 1
   local n
   case "$2" in -*|*=*) return 1 ;; esac
-  case "$2" in show|create|set|unset|init|gitignore|keys)
+  case "$2" in show|create|set|unset|init|gitignore|keys|models)
     echo "note: '$1' took no provider name because '$2' is a command; use $1=$2 to name a provider so called" >&2; return 1 ;; esac
   if key_type "$2" > /dev/null 2>&1; then
     echo "note: '$1' took no provider name because '$2' is a config key; use $1=$2 to name a provider so called" >&2; return 1
@@ -109,6 +113,8 @@ while [ $# -gt 0 ]; do
     --provider-file=*) MODE=file; EXPLICIT=1; PNAME="${1#*=}"; shift ;;
     --provider-file) MODE=file; EXPLICIT=1; if PNAME=$(take_name "$1" "${2:-}"); then shift 2; else PNAME=""; shift; fi ;;
     --json) JSON=1; shift ;;
+    --backend) MODELS_BACKEND="${2:-}"; shift 2 ;;
+    --backend=*) MODELS_BACKEND="${1#*=}"; shift ;;
     --yes|-y) YES=1; shift ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -180,6 +186,20 @@ coerce() {
           || { echo "unknown backend '$raw' (available: $(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | tr '\n' ' ' | sed 's/ $//'))" >&2; return 1; }
       fi
       if [ "$key" = "dir" ] && [ -z "$raw" ]; then echo "dir cannot be empty" >&2; return 1; fi
+      if [ "$key" = "effort" ] && [ -n "$raw" ]; then
+        # Efforts are a closed list per model (or per backend when the model
+        # is not listed); no list known = anything goes.
+        local msg
+        msg=$(rl_check_effort "$(validation_backend)" "$(validation_model)" "$raw") || { echo "$msg" >&2; return 1; }
+      fi
+      if [ "$key" = "model" ] && [ -n "$raw" ]; then
+        # Model lists can be incomplete (new models, custom endpoints): only note it.
+        local cat be
+        be=$(validation_backend); cat=$(rl_backend_models "$be")
+        if [ "$(jq '.models | length' <<< "$cat")" -gt 0 ] && ! jq -e --arg m "$raw" '.models | map(.id) | index($m)' <<< "$cat" > /dev/null; then
+          echo "note: model '$raw' is not in backend $be's model list ($(jq -r '.models | map(.id) | join(" ")' <<< "$cat")); it is passed through as given" >&2
+        fi
+      fi
       case "$key" in prompts.*)
         if [ -n "$raw" ] && [ ! -f "$(rl_prompt_path "$ROOT" "$raw")" ]; then
           echo "note: $key: $(rl_prompt_path "$ROOT" "$raw") does not exist yet; the loop will fail until it does" >&2
@@ -203,6 +223,29 @@ coerce() {
     list)
       jq -n --arg v "$raw" '$v | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))' ;;
   esac
+}
+
+# validation_backend -> the backend that model/effort values are checked
+# against: one set in the same command (backend=NAME), else the effective one.
+validation_backend() {
+  local a
+  for a in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$a" in backend=*) printf '%s' "${a#backend=}"; return 0 ;; esac
+  done
+  [ -n "${WIZ_BACKEND:-}" ] && { printf '%s' "$WIZ_BACKEND"; return 0; }
+  rl_resolve_config | jq -r .backend
+}
+
+# validation_model -> the model that an effort is checked against: one set in
+# the same command (model=NAME), the one chosen so far in the wizard, else the
+# effective one.
+validation_model() {
+  local a
+  for a in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$a" in model=*) printf '%s' "${a#model=}"; return 0 ;; esac
+  done
+  [ -n "${WIZ_MODEL_SET:-}" ] && { printf '%s' "$WIZ_MODEL"; return 0; }
+  rl_resolve_config | jq -r '.model // ""'
 }
 
 apply_set() { # KEY RAW -> updates $NEW
@@ -239,11 +282,30 @@ cmd_keys() {
   for k in $KEYS; do printf '  %-16s %-9s %s\n' "$k" "$(key_type "$k")" "$(key_help "$k")"; done
 }
 
+cmd_models() {
+  local be cat
+  be="${MODELS_BACKEND:-$(rl_resolve_config | jq -r .backend)}"
+  printf '%s' "$be" | grep -qE '^[a-z0-9_-]+$' && [ -f "$RL_BACKENDS_DIR/$be.sh" ] \
+    || rl_die "unknown backend '$be' (available: $(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | tr '\n' ' ' | sed 's/ $//'))"
+  cat=$(rl_backend_models "$be")
+  if [ "$JSON" = "1" ]; then printf '%s\n' "$cat"; return; fi
+  echo "models for backend $be$(jq -r 'if .source then " (from \(.source))" else "" end' <<< "$cat"):"
+  if [ "$(jq '.models | length' <<< "$cat")" -eq 0 ]; then
+    echo "  (no list available; any model name is passed through)"
+  else
+    jq -r '.models[] | "  \(.id)\t\(.label)\(if .default then " (default)" else "" end)\(if (.efforts | length) > 0 then "  efforts: " + (.efforts | join(", ")) else "" end)"' <<< "$cat" | column -t -s "$(printf '\t')" 2>/dev/null || jq -r '.models[] | "  \(.id)  \(.label)"' <<< "$cat"
+  fi
+  echo "efforts: $(jq -r 'if (.efforts | length) > 0 then (.efforts | join(", ")) else "(none listed)" end' <<< "$cat")"
+  echo "default: model $(jq -r '.default_model // "(backend default)"' <<< "$cat"), effort $(jq -r '.default_effort // "(backend default)"' <<< "$cat")"
+  jq -r 'if .note then "note: " + .note else empty end' <<< "$cat"
+  echo "set with: config.sh set model=NAME effort=LEVEL   (or /review-config, or start.sh --model/--effort)"
+}
+
 cmd_show() {
   local eff def label path kind
   eff=$(rl_resolve_config)
   def=$(HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent REVIEW_LOOP_PROVIDER=none REVIEW_LOOP_DIR= REVIEW_LOOP_MAX_ROUNDS= REVIEW_LOOP_BACKEND= \
-        REVIEW_LOOP_MODEL= REVIEW_LOOP_USAGE= REVIEW_LOOP_DASHBOARD_OPEN= REVIEW_LOOP_DASHBOARD_OUT= \
+        REVIEW_LOOP_MODEL= REVIEW_LOOP_EFFORT= REVIEW_LOOP_USAGE= REVIEW_LOOP_DASHBOARD_OPEN= REVIEW_LOOP_DASHBOARD_OUT= \
         bash -c 'cd / && . "$1" && rl_resolve_config' _ "$RL_SCRIPTS_DIR/lib.sh")
   if [ "$JSON" = "1" ]; then
     local files='[]'
@@ -442,14 +504,37 @@ cmd_init() {
   if [ -f "$TARGET" ]; then echo "Updating $WHERE (press Enter to keep the current value)"; else echo "Creating $WHERE (press Enter to keep the current value)"; fi
   echo "  provider: ${PROVIDER:-none}"
   echo
+  WIZ_BACKEND=$(jq -r .backend <<< "$eff")
+  WIZ_MODEL=$(jq -r '.model // ""' <<< "$eff"); WIZ_MODEL_SET=1
+  local cat choices n
   for k in $KEYS; do
     type=$(key_type "$k")
     cur=$(display "$(get_in "$eff" "$k")")
     while :; do
       if [ "$YES" = "1" ]; then raw=""; else
         printf '  %s — %s%s\n' "$k" "$(key_help "$k")" "$(key_clearable "$k" && printf ' (type - to clear)')"
+        choices=""
+        case "$k" in
+          model|effort)
+            # Offer what the chosen backend lists, numbered; a name still works.
+            cat=$(rl_backend_models "$WIZ_BACKEND")
+            if [ "$k" = "model" ]; then choices=$(jq -r '.models[] | "\(.id)\t\(.label)\(if .default then " (default)" else "" end)"' <<< "$cat")
+            else choices=$(jq -r '.[] | "\(.)\t"' <<< "$(rl_effort_choices "$cat" "$WIZ_MODEL")"); fi
+            if [ -n "$choices" ]; then
+              if [ "$k" = "effort" ] && [ -n "$WIZ_MODEL" ] && jq -e --arg m "$WIZ_MODEL" '.models | map(.id) | index($m)' <<< "$cat" > /dev/null; then
+                echo "    choices for model $WIZ_MODEL (type a number or a name):"
+              else
+                echo "    choices for backend $WIZ_BACKEND (type a number or a name):"
+              fi
+              n=0; while IFS=$'\t' read -r id label; do n=$((n + 1)); printf '      %d) %s%s\n' "$n" "$id" "${label:+ — $label}"; done <<< "$choices"
+            fi ;;
+        esac
         printf '    [%s]: ' "$cur"
         IFS= read -r raw < /dev/stdin || raw=""
+        if [ -n "$choices" ] && printf '%s' "$raw" | grep -qE '^[1-9][0-9]*$'; then
+          raw=$(printf '%s\n' "$choices" | sed -n "${raw}p" | cut -f1)
+          [ -n "$raw" ] || { echo "    no such choice" >&2; continue; }
+        fi
       fi
       if [ -z "$raw" ]; then
         # Enter keeps things as they are: the key is not written, so inherited
@@ -461,7 +546,10 @@ cmd_init() {
         raw=""
       fi
       if val=$(coerce "$k" "$raw"); then
-        set_in_target "$k" "$val"; written+=("$k"); break
+        set_in_target "$k" "$val"; written+=("$k")
+        [ "$k" = "backend" ] && WIZ_BACKEND="$raw"
+        [ "$k" = "model" ] && WIZ_MODEL="$raw"
+        break
       fi
       [ "$YES" = "1" ] && break
     done
@@ -494,6 +582,7 @@ case "$CMD" in
   init) no_args; cmd_init ;;
   gitignore) no_args; cmd_gitignore ;;
   keys) no_args; cmd_keys ;;
+  models) no_args; cmd_models ;;
   ""|-h|--help|help) usage ;;
-  *) rl_die "unknown command '$CMD' (show|create|set|unset|init|gitignore|keys)" ;;
+  *) rl_die "unknown command '$CMD' (show|create|set|unset|init|gitignore|keys|models)" ;;
 esac

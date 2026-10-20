@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # review-loop — start a new coder/reviewer loop in the current project.
 #
-# Usage: start.sh [--backend NAME] [--model MODEL] [--max-rounds N] [--dir DIR]
+# Usage: start.sh [--backend NAME] [--model MODEL] [--effort LEVEL] [--max-rounds N] [--dir DIR]
 #                 [--force] [--git-exclude] <task description>
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -13,7 +13,8 @@ Usage: start.sh [options] <task description>
 
 Options:
   --backend NAME     reviewer backend (codex, claude, ... see scripts/backends/)
-  --model MODEL      model passed to the backend (empty = backend default)
+  --model MODEL      model passed to the backend (empty = backend default; list: config.sh models)
+  --effort LEVEL     reasoning effort passed to the backend (empty = backend default)
   --max-rounds N     stop after N review rounds without approval (default 5)
   --dir DIR          storage dir for loop folders (default .review-loop)
   --usage            record token usage/cost per round and agent (default: off)
@@ -38,7 +39,7 @@ Config precedence: flags > REVIEW_LOOP_* env > ./.<provider>/review-loop.json
 HELP
 }
 
-FLAG_BACKEND="" FLAG_MODEL="" FLAG_MAX="" FLAG_DIR="" FLAG_SESSION="" FLAG_USAGE="" FORCE=0 GIT_EXCLUDE=0
+FLAG_BACKEND="" FLAG_MODEL="" FLAG_EFFORT="" FLAG_MAX="" FLAG_DIR="" FLAG_SESSION="" FLAG_USAGE="" FORCE=0 GIT_EXCLUDE=0
 FLAG_P_REVIEWER="" FLAG_P_REVIEWER_EXTRA="" FLAG_P_CODER="" FLAG_P_CODER_EXTRA=""
 ARGS=()
 while [ $# -gt 0 ]; do
@@ -47,6 +48,8 @@ while [ $# -gt 0 ]; do
     --backend=*) FLAG_BACKEND="${1#*=}"; shift ;;
     --model) FLAG_MODEL="${2:-}"; shift 2 ;;
     --model=*) FLAG_MODEL="${1#*=}"; shift ;;
+    --effort) FLAG_EFFORT="${2:-}"; shift 2 ;;
+    --effort=*) FLAG_EFFORT="${1#*=}"; shift ;;
     --max-rounds) FLAG_MAX="${2:-}"; shift 2 ;;
     --max-rounds=*) FLAG_MAX="${1#*=}"; shift ;;
     --dir) FLAG_DIR="${2:-}"; shift 2 ;;
@@ -88,9 +91,10 @@ if rl_load_loop; then
 fi
 
 CFG=$(rl_resolve_config)
-CFG=$(jq -c --arg be "$FLAG_BACKEND" --arg model "$FLAG_MODEL" --arg mr "$FLAG_MAX" --arg dir "$FLAG_DIR" --arg usage "$FLAG_USAGE" '
+CFG=$(jq -c --arg be "$FLAG_BACKEND" --arg model "$FLAG_MODEL" --arg effort "$FLAG_EFFORT" --arg mr "$FLAG_MAX" --arg dir "$FLAG_DIR" --arg usage "$FLAG_USAGE" '
   . + (if $be != "" then {backend: $be} else {} end)
     + (if $model != "" then {model: $model} else {} end)
+    + (if $effort != "" then {effort: $effort} else {} end)
     + (if $mr != "" then {max_rounds: ($mr | tonumber)} else {} end)
     + (if $dir != "" then {dir: $dir} else {} end)
     + (if $usage != "" then {usage: ($usage == "true")} else {} end)' <<< "$CFG")
@@ -103,6 +107,7 @@ CFG=$(jq -c --arg r "$FLAG_P_REVIEWER" --arg re "$FLAG_P_REVIEWER_EXTRA" --arg c
 
 BACKEND=$(jq -r .backend <<< "$CFG")
 MODEL=$(jq -r .model <<< "$CFG")
+EFFORT=$(jq -r '.effort // ""' <<< "$CFG")
 MAX_ROUNDS=$(jq -r .max_rounds <<< "$CFG")
 DIR=$(jq -r .dir <<< "$CFG")
 USAGE=$(jq -r '.usage == true' <<< "$CFG")
@@ -117,6 +122,7 @@ done
 printf '%s' "$MAX_ROUNDS" | grep -qE '^[1-9][0-9]*$' || rl_die "max_rounds must be a positive integer (got '$MAX_ROUNDS')"
 printf '%s' "$BACKEND" | grep -qE '^[a-z0-9_-]+$' || rl_die "invalid backend name '$BACKEND'"
 [ -f "$RL_BACKENDS_DIR/$BACKEND.sh" ] || rl_die "unknown backend '$BACKEND' (no $RL_BACKENDS_DIR/$BACKEND.sh)"
+MSG=$(rl_check_effort "$BACKEND" "$MODEL" "$EFFORT") || rl_die "$MSG"
 
 case "$BACKEND" in
   codex|claude)
@@ -147,10 +153,10 @@ mkdir -p "$LOOP_DIR" "$ROOT/.claude" || rl_die "cannot create $LOOP_DIR"
 printf '%s\n' "$TASK" > "$LOOP_DIR/task.md"
 
 jq -n \
-  --arg id "$LOOP_ID" --arg be "$BACKEND" --arg model "$MODEL" --argjson mr "$MAX_ROUNDS" \
+  --arg id "$LOOP_ID" --arg be "$BACKEND" --arg model "$MODEL" --arg effort "$EFFORT" --argjson mr "$MAX_ROUNDS" \
   --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" --argjson prompts "$PROMPTS" \
   '{loop_id: $id, active: true, phase: "coding", round: 1, max_rounds: $mr,
-    backend: $be, model: $model, base_ref: $base, dir: $dir, root: $root, usage: $usage, prompts: $prompts,
+    backend: $be, model: $model, effort: $effort, base_ref: $base, dir: $dir, root: $root, usage: $usage, prompts: $prompts,
     session_id: (if $sid == "" then null else $sid end), started_at: $t, retries: 0, verdict: null, rounds: [],
     round_started_at: $t, round_started_epoch: $e, paused_s: 0, failed_review_s: 0}' > "$LOOP_DIR/state.json"
 
@@ -165,7 +171,7 @@ if [ "$EXISTING" = "1" ]; then
 fi
 
 printf '%s\n' "$LOOP_DIR" > "$ROOT/$RL_POINTER_REL"
-rl_log "$LOOP_DIR" "started loop $LOOP_ID backend=$BACKEND model=${MODEL:-default} max_rounds=$MAX_ROUNDS usage=$USAGE base_ref=$BASE_REF"
+rl_log "$LOOP_DIR" "started loop $LOOP_ID backend=$BACKEND model=${MODEL:-default} effort=${EFFORT:-default} max_rounds=$MAX_ROUNDS usage=$USAGE base_ref=$BASE_REF"
 
 if [ "$GIT_EXCLUDE" = "1" ] && [ -d "$ROOT/.git" ]; then
   REL_DIR=$(rl_rel_to_root "$ROOT" "$ABS_DIR")
@@ -182,7 +188,7 @@ cat << OUT
 Review loop started
   id:         $LOOP_ID
   dir:        $LOOP_DIR
-  backend:    $BACKEND${MODEL:+ (model: $MODEL)}
+  backend:    $BACKEND (model: ${MODEL:-default}, effort: ${EFFORT:-default})
   max rounds: $MAX_ROUNDS
   usage:      $([ "$USAGE" = "true" ] && echo "recorded in usage.md" || echo "off (enable with --usage)")
   task:       $LOOP_DIR/task.md

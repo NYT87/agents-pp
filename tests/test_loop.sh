@@ -820,7 +820,7 @@ echo '{}' > "$R/.claude/review-loop.json"
 section "config command"
 C="$S/config.sh"
 R=$(new_repo r24); rm -f "$HOME/.claude/review-loop.json"
-assert_eq "keys lists every key" "13" "$(bash "$C" keys | grep -c .)"
+assert_eq "keys lists every key" "14" "$(bash "$C" keys | grep -c .)"
 OUT=$(cd "$R" && bash "$C" show)
 assert_contains "show: missing project file" "review-loop.json (missing)" "$OUT"
 assert_contains "show: backend row shows env value and default" "codex" "$(printf '%s' "$OUT" | grep '^  backend ' | grep 'fake')"
@@ -954,7 +954,7 @@ assert_contains "gitignore dir=.: idempotent with the pattern" "already covers" 
 (cd "$R" && bash "$C" unset dir dashboard.dirs > /dev/null)
 
 R=$(new_repo r25); rm -f "$HOME/.claude/review-loop.json"
-OUT=$(cd "$R" && printf 'nope\nclaude\n\nabc\n4\n\nyes\n\n\nno\n\n\n\n\n\ny\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf 'nope\nclaude\n\n\nabc\n4\n\nyes\n\n\nno\n\n\n\n\n\ny\n' | bash "$C" init 2>&1)
 F="$R/.review-loop.json"
 assert_contains "init: creating message" "Creating $F" "$OUT"
 assert_contains "init: shows current value as default" "[fake]:" "$OUT"
@@ -970,7 +970,7 @@ assert_contains "init: gitignore offered last" "Add these to .gitignore?" "$OUT"
 assert_contains "init: gitignore written on y" "/.review-loop/" "$(cat "$R/.gitignore")"
 assert_contains "init: gitignore includes default dashboard file" "/.review-loop/dashboard.html" "$(cat "$R/.gitignore")"
 (cd "$R" && bash "$C" set --user model=opus > /dev/null)
-OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: updating message" "Updating $F" "$OUT"
 assert_contains "init: shows inherited value" "[opus]:" "$OUT"
 assert_eq "init: Enter keeps inherited value out of the file" "null" "$(jq .model "$F")"
@@ -978,13 +978,13 @@ assert_eq "init: changed value written" "9" "$(jq .max_rounds "$F")"
 assert_eq "init: untouched value kept" "claude" "$(jq -r .backend "$F")"
 assert_contains "init: gitignore already covered" "already covers" "$OUT"
 (cd "$R" && bash "$C" set model=opus dashboard.out=docs/d.html dashboard.dirs=a,b > /dev/null)
-OUT=$(cd "$R" && printf '\n-\n\n\n\n-\n-\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n-\n\n\n\n\n-\n-\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: clear hint shown for clearable keys" "(type - to clear)" "$OUT"
 assert_eq "init: - clears model" '""' "$(jq -c .model "$F")"
 assert_eq "init: - clears dashboard.dirs to []" "[]" "$(jq -c .dashboard.dirs "$F")"
 assert_eq "init: - clears dashboard.out" '""' "$(jq -c .dashboard.out "$F")"
 assert_eq "init: cleared model overrides the user file" "" "$(cd "$R" && bash "$C" show --json | jq -r .effective.model)"
-OUT=$(cd "$R" && printf -- '-\n\n-\n-\n5\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf -- '-\n\n-\n\n-\n5\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: - is invalid for backend" "unknown backend '-'" "$OUT"
 assert_contains "init: - is invalid for max_rounds" "positive integer (got '-')" "$OUT"
 assert_eq "init: retry after - works" "5" "$(jq .max_rounds "$F")"
@@ -1086,6 +1086,7 @@ OUT=$(cd "$R" && printf '
 
 
 
+
 n
 ' | bash "$C" init --provider codex 2>&1)
 assert_contains "init --provider shows that provider's current value" "[3]:" "$OUT"
@@ -1141,7 +1142,7 @@ assert_contains "show rejects stray arguments" "unexpected argument 'extra'" "$(
 assert_contains "create rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" create --project stray 2>&1 || true)"
 assert_contains "gitignore rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" gitignore now 2>&1 || true)"
 assert_contains "bad provider name rejected" "invalid provider name" "$(cd "$R" && bash "$C" set --provider='bad name' max_rounds=1 2>&1 || true)"
-OUT=$(cd "$R" && printf '\n\n4\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --provider codex 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n4\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --provider codex 2>&1)
 assert_contains "init --provider writes into the section" "Wrote $R/.review-loop.json (providers.codex)" "$OUT"
 assert_eq "init --provider value in section" '4' "$(jq .providers.codex.max_rounds "$R/.review-loop.json")"
 rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json" "$HOME/.codex"
@@ -1165,7 +1166,7 @@ assert_not_contains "unmasked key gets no warning" "warning:" "$OUT"
 OUT=$(cd "$R" && bash "$C" set max_rounds=7 2>&1)
 assert_contains "both files present: default is the shared file" "Updated $R/.review-loop.json" "$OUT"
 assert_contains "both files present: masked write warns" "effective value is 4, set by project claude" "$OUT"
-OUT=$(cd "$R" && printf '\n\n8\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n8\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init warns about masked values too" "warning: max_rounds=8" "$OUT"
 rm -f "$R/.review-loop.json"
 mkdir -p "$HOME/.claude"; echo '{"model": "legacy"}' > "$HOME/.claude/review-loop.json"
@@ -1182,7 +1183,7 @@ rm -f "$HOME/.config/review-loop/config.json" "$HOME/.claude/review-loop.json"
 mkdir -p "$R/.claude"; echo '{"max_rounds": 2, "model": "m"}' > "$R/.claude/review-loop.json"
 OUT=$(cd "$R" && bash "$C" init --project --yes 2>&1)
 assert_not_contains "init --yes writes nothing, so no masking warnings" "warning:" "$OUT"
-OUT=$(cd "$R" && printf '\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --project 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --project 2>&1)
 assert_contains "init warns for the key it wrote" "warning: max_rounds=9" "$OUT"
 assert_eq "init warns only once" "1" "$(printf '%s\n' "$OUT" | grep -c '^warning:')"
 assert_not_contains "init does not warn for keys it did not write" "warning: model=" "$OUT"
@@ -1397,9 +1398,9 @@ fi
 
 section "dashboard configuration panel"
 R=$(new_repo r36); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
-assert_eq "keys --json lists every key" "13" "$(bash "$C" keys --json | jq '.keys | length')"
+assert_eq "keys --json lists every key" "14" "$(bash "$C" keys --json | jq '.keys | length')"
 assert_eq "keys --json excludes the fake backend" '["claude","codex"]' "$(bash "$C" keys --json | jq -c .backends)"
-assert_eq "keys --json marks clearable keys" "7" "$(bash "$C" keys --json | jq '[.keys[] | select(.clearable)] | length')"
+assert_eq "keys --json marks clearable keys" "8" "$(bash "$C" keys --json | jq '[.keys[] | select(.clearable)] | length')"
 (cd "$R" && bash "$C" set max_rounds=3 > /dev/null)
 J=$(cd "$R" && bash "$C" show --json)
 assert_eq "show --json carries sources" '"project shared"' "$(jq .sources.max_rounds <<< "$J")"
@@ -1407,7 +1408,7 @@ assert_eq "show --json source for env" '"env REVIEW_LOOP_BACKEND"' "$(jq .source
 assert_eq "show --json source default" '"default"' "$(jq .sources.model <<< "$J")"
 (cd "$R" && bash "$S/dashboard.sh" > /dev/null)
 D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
-assert_eq "dashboard embeds the config keys" "13" "$(jq '.config.keys | length' <<< "$D")"
+assert_eq "dashboard embeds the config keys" "14" "$(jq '.config.keys | length' <<< "$D")"
 assert_eq "dashboard embeds effective values" "3" "$(jq .config.show.effective.max_rounds <<< "$D")"
 assert_eq "dashboard embeds sources" '"project shared"' "$(jq .config.show.sources.max_rounds <<< "$D")"
 CABS="$(cd "$(dirname "$C")" && pwd)/config.sh"
@@ -1643,6 +1644,151 @@ else
 fi
 rm -f "$R/.review-loop.json"
 
+section "models and effort"
+R=$(new_repo r37m); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
+# the catalog, from the backend's --models
+J=$(cd "$R" && bash "$C" models --json)
+assert_eq "models --json: the effective backend's catalog" "fake" "$(jq -r .backend <<< "$J")"
+assert_eq "models --json: models listed" '["fake-fast","fake-smart","fake-mystery"]' "$(jq -c '.models | map(.id)' <<< "$J")"
+assert_eq "models --json: efforts listed (backend-wide union)" '["low","high","max"]' "$(jq -c .efforts <<< "$J")"
+assert_eq "models --json: defaults" "fake-fast low" "$(jq -r '"\(.default_model) \(.default_effort)"' <<< "$J")"
+OUT=$(cd "$R" && bash "$C" models)
+assert_contains "models: text lists the models" "fake-smart" "$OUT"
+assert_contains "models: text marks the default" "fake-fast" "$OUT"
+assert_contains "models: text lists the efforts" "efforts: low, high, max" "$OUT"
+assert_eq "models --backend claude: aliases and full names" "true" "$(bash "$C" models --backend claude --json | jq '(.models | map(.id)) as $m | ($m | index("opus")) != null and ($m | index("claude-opus-5-5")) != null')"
+assert_eq "models --backend claude: efforts up to max" '["low","medium","high","xhigh","max"]' "$(bash "$C" models --backend claude --json | jq -c .efforts)"
+assert_eq "models: unknown backend refused" "1" "$(bash "$C" models --backend nope > /dev/null 2>&1; echo $?)"
+assert_contains "keys lists effort" "effort" "$(bash "$C" keys)"
+# codex: from Codex's own cache and config, listed models in priority order
+CX="$TMP/codex-home"; mkdir -p "$CX"
+printf 'model = "gpt-x"\nmodel_reasoning_effort = "high"\n' > "$CX/config.toml"
+jq -n '{models: [
+  {slug: "gpt-x", display_name: "GPT X", visibility: "list", priority: 2, default_reasoning_level: "low", supported_reasoning_levels: [{effort: "low"}, {effort: "medium"}, {effort: "high"}]},
+  {slug: "gpt-y", display_name: "GPT Y", visibility: "list", priority: 1, default_reasoning_level: "medium", supported_reasoning_levels: [{effort: "medium"}, {effort: "high"}, {effort: "xhigh"}]},
+  {slug: "gpt-hidden", display_name: "Hidden", visibility: "hide", priority: 0, supported_reasoning_levels: [{effort: "max"}]}]}' > "$CX/models_cache.json"
+J=$(CODEX_HOME="$CX" bash "$S/backends/codex.sh" --models)
+assert_eq "codex --models: listed models in Codex's order, hidden ones skipped" '["gpt-y","gpt-x"]' "$(jq -c '.models | map(.id)' <<< "$J")"
+assert_eq "codex --models: config.toml model is the default" "gpt-x true" "$(jq -r '"\(.default_model) \(.models[1].default)"' <<< "$J")"
+assert_eq "codex --models: efforts in their natural order" '["low","medium","high","xhigh"]' "$(jq -c .efforts <<< "$J")"
+assert_eq "codex --models: config.toml effort is the default" "high" "$(jq -r .default_effort <<< "$J")"
+assert_eq "codex --models: per-model efforts and label" "GPT Y medium,high,xhigh" "$(jq -r '.models[0] | "\(.label) \(.efforts | join(","))"' <<< "$J")"
+J=$(CODEX_HOME="$TMP/no-codex-home" bash "$S/backends/codex.sh" --models)
+assert_eq "codex --models without a cache: no models, NO effort restriction, a note" "0 0 true" "$(jq -r '"\(.models | length) \(.efforts | length) \(.note != null)"' <<< "$J")"
+# validation: effort is a closed list, model only a note
+OUT=$(cd "$R" && bash "$C" set effort=high 2>&1); RC=$?
+assert_eq "set effort from the list" "0" "$RC"
+assert_eq "effort stored" "high" "$(cd "$R" && bash "$C" show --json | jq -r .effective.effort)"
+OUT=$(cd "$R" && bash "$C" set effort=ultra 2>&1); RC=$?
+assert_eq "set unknown effort refused" "1" "$RC"
+assert_contains "unknown effort explained with the list" "unknown effort 'ultra' for backend fake (available: low high max)" "$OUT"
+OUT=$(cd "$R" && bash "$C" set model=fake-smart 2>&1)
+assert_not_contains "a listed model gets no note" "not in backend" "$OUT"
+OUT=$(cd "$R" && bash "$C" set model=brand-new 2>&1); RC=$?
+assert_eq "an unlisted model is accepted" "0" "$RC"
+assert_contains "an unlisted model gets a note" "note: model 'brand-new' is not in backend fake's model list (fake-fast fake-smart fake-mystery); it is passed through as given" "$OUT"
+assert_contains "effort is validated against a backend set in the same command" "unknown effort 'nope' for backend claude" "$(cd "$R" && bash "$C" set backend=claude effort=nope 2>&1 || true)"
+# per model: a listed model's own levels win over the backend-wide list
+OUT=$(cd "$R" && bash "$C" set model=fake-fast effort=max 2>&1); RC=$?
+assert_eq "effort outside the model's levels refused" "1" "$RC"
+assert_contains "effort refusal names the model and its levels" "unknown effort 'max' for model fake-fast (backend fake; available: low high)" "$OUT"
+assert_eq "effort within the model's levels accepted" "0" "$(cd "$R" && bash "$C" set model=fake-smart effort=max > /dev/null 2>&1; echo $?)"
+assert_eq "effort alone is checked against the effective model" "1" "$(cd "$R" && bash "$C" set model=fake-fast > /dev/null 2>&1; bash "$C" set effort=max > /dev/null 2>&1; echo $?)"
+assert_eq "an unlisted model falls back to the backend-wide levels" "0" "$(cd "$R" && bash "$C" set model=brand-new effort=max > /dev/null 2>&1; echo $?)"
+assert_contains "an unlisted model still refuses a level outside the backend's" "unknown effort 'ultra' for backend fake (available: low high max)" "$(cd "$R" && bash "$C" set model=brand-new effort=ultra 2>&1 || true)"
+# a listed model with an EMPTY level list has unknown capabilities: nothing is
+# refused for it (no fallback to the backend-wide list)
+assert_eq "listed model with no levels: any effort accepted" "0" "$(cd "$R" && bash "$C" set model=fake-mystery effort=ultra > /dev/null 2>&1; echo $?)"
+assert_eq "rl_effort_choices: a listed model's empty list is kept" "[]" "$(bash -c '. "$1"; rl_effort_choices "$2" fake-mystery' _ "$S/lib.sh" "$(bash "$C" models --json)")"
+assert_eq "rl_effort_choices: an unlisted model gets the backend-wide list" '["low","high","max"]' "$(bash -c '. "$1"; rl_effort_choices "$2" nope' _ "$S/lib.sh" "$(bash "$C" models --json)")"
+assert_eq "rl_check_effort: unknown capabilities accept anything" "0" "$(bash -c '. "$1"; rl_check_effort fake fake-mystery ultra' _ "$S/lib.sh" > /dev/null; echo $?)"
+assert_contains "rl_check_effort: a listed model with levels refuses others" "unknown effort 'max' for model fake-fast (backend fake; available: low high)" "$(bash -c '. "$1"; rl_check_effort fake fake-fast max' _ "$S/lib.sh" || true)"
+# no list known (codex without its cache here): nothing is refused
+assert_eq "no capability list: any effort accepted" "0" "$(cd "$R" && bash "$C" set backend=codex model=gpt-whatever effort=ultra > /dev/null 2>&1; echo $?)"
+(cd "$R" && bash "$C" unset backend model effort > /dev/null)
+# the loop: --effort / env / config reach the backend and the records
+ENVF="$TMP/fake-env.txt"
+OUT=$(start "$R" --model fake-smart --effort high "task"); L=$(pointer "$R"); echo x > "$R/f"
+assert_contains "start prints model and effort" "backend:    fake (model: fake-smart, effort: high)" "$OUT"
+assert_eq "effort frozen in state" "high" "$(st "$L" effort)"
+assert_contains "status shows the effort" "backend:     fake (model: fake-smart, effort: high)" "$(cd "$R" && bash "$S/status.sh")"
+coder "$L" 1; verdicts approved
+(cd "$R" && REVIEW_LOOP_FAKE_ENV_FILE="$ENVF" bash "$S/review.sh" > /dev/null)
+assert_eq "the backend receives model and effort" "MODEL=fake-smart EFFORT=high" "$(tr '\n' ' ' < "$ENVF" | sed 's/ $//')"
+assert_contains "review front matter records the effort" "effort: high" "$(cat "$L/round-01-review.md")"
+assert_contains "log records the effort" "effort=high" "$(cat "$L/loop.log")"
+OUT=$(start "$R" --model fake-fast --effort max "task" 2>&1); RC=$?
+assert_eq "start refuses an effort the model does not support" "1" "$RC"
+assert_contains "start names the model's levels" "unknown effort 'max' for model fake-fast (backend fake; available: low high)" "$OUT"
+assert_no_file "refused start creates no loop" "$R/.claude/review-loop.active"
+start "$R" --model fake-smart --effort max "task" > /dev/null; L=$(pointer "$R")
+assert_eq "start accepts a level the model supports" "fake-smart max" "$(jq -r '"\(.model) \(.effort)"' "$L/state.json")"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+OUT=$(start "$R" --effort ultra "task" 2>&1); RC=$?
+assert_eq "start refuses an effort the backend does not list" "1" "$RC"
+assert_contains "start names the available efforts" "unknown effort 'ultra' for backend fake (available: low high max)" "$OUT"
+start "$R" "task" > /dev/null; L=$(pointer "$R")
+assert_eq "no effort: empty in state" "" "$(st "$L" effort)"
+assert_contains "no effort: printed as default" "effort: default" "$(cd "$R" && bash "$S/status.sh")"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+REVIEW_LOOP_EFFORT=low start "$R" "task" > /dev/null; L=$(pointer "$R")
+assert_eq "effort from the environment" "low" "$(st "$L" effort)"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+(cd "$R" && bash "$C" set effort=high > /dev/null); start "$R" "task" > /dev/null; L=$(pointer "$R")
+assert_eq "effort from the config file" "high" "$(st "$L" effort)"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null); (cd "$R" && bash "$C" unset effort > /dev/null)
+# the wizard offers numbered choices for model and effort
+rm -f "$R/.review-loop.json"
+OUT=$(cd "$R" && printf '\n2\n2\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "wizard lists the models" "1) fake-fast — Fake fast (default)" "$OUT"
+assert_contains "wizard lists the chosen model's efforts" "choices for model fake-smart" "$OUT"
+assert_contains "wizard lists the efforts" "3) max" "$OUT"
+assert_eq "wizard: model picked by number" "fake-smart" "$(jq -r .model "$R/.review-loop.json")"
+assert_eq "wizard: effort picked by number" "high" "$(jq -r .effort "$R/.review-loop.json")"
+rm -f "$R/.review-loop.json"
+OUT=$(cd "$R" && printf '\n1\n3\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "wizard: a model with fewer levels offers only those" "choices for model fake-fast" "$OUT"
+assert_not_contains "wizard: no level the model lacks" "3) max" "$OUT"
+assert_contains "wizard: a level the model lacks is refused by number" "no such choice" "$OUT"
+rm -f "$R/.review-loop.json"
+OUT=$(cd "$R" && printf '\n3\nwhatever\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+assert_not_contains "wizard: a model with unknown levels offers no list" "choices for model fake-mystery" "$OUT"
+assert_eq "wizard: a typed effort is accepted for it" "fake-mystery whatever" "$(jq -r '"\(.model) \(.effort)"' "$R/.review-loop.json")"
+OUT=$(cd "$R" && printf '\n9\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "wizard: a number out of range is refused" "no such choice" "$OUT"
+rm -f "$R/.review-loop.json"
+# the dashboard embeds every backend's catalog
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "dashboard embeds the claude catalog" "true" "$(jq '.config.models.claude.efforts | index("max") != null' <<< "$D")"
+assert_eq "dashboard embeds a catalog per listed backend" '["claude","codex"]' "$(jq -c '.config.models | keys' <<< "$D")"
+# the catalog's defaults come from the user's tool configuration: hidden on a
+# shareable page, shown with --with-user-config (the model list itself stays)
+(cd "$R" && CODEX_HOME="$CX" bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "static page: catalog defaults hidden" "null null true" "$(jq -r '.config.models.codex | "\(.default_model) \(.default_effort) \(.redacted_defaults)"' <<< "$D")"
+assert_eq "static page: no model marked as the user's default" "0" "$(jq '[.config.models.codex.models[] | select(.default)] | length' <<< "$D")"
+assert_eq "static page: the model list itself stays" '["gpt-y","gpt-x"]' "$(jq -c '.config.models.codex.models | map(.id)' <<< "$D")"
+(cd "$R" && CODEX_HOME="$CX" bash "$S/dashboard.sh" --with-user-config > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "--with-user-config: catalog defaults embedded" "gpt-x high" "$(jq -r '.config.models.codex | "\(.default_model) \(.default_effort)"' <<< "$D")"
+assert_eq "--with-user-config: the default model is marked" "gpt-x" "$(jq -r '.config.models.codex.models[] | select(.default) | .id' <<< "$D")"
+assert_eq "--with-user-config: not flagged as redacted" "null" "$(jq '.config.models.codex.redacted_defaults' <<< "$D")"
+if command -v node > /dev/null 2>&1; then
+  DERIVE="$TMP/derive-models.js"
+  sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
+  MOUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const k = { key: "effort", type: "string" }, cat = { models: [{ id: "small", efforts: ["low"] }, { id: "big", efforts: ["low", "max"] }, { id: "mystery", efforts: [] }, { id: "bare" }], efforts: ["low", "high", "max"] };
+    console.log([RL.validateValue(k, "high", [], cat) === "", RL.validateValue(k, "", [], cat) === "", RL.validateValue(k, "ultra", [], cat), RL.validateValue(k, "ultra", [], null) === "", RL.validateValue(k, "ultra", [], { models: [], efforts: [] }) === ""].join(" | "));
+    console.log([RL.effortChoices(cat, "small").join(","), RL.effortChoices(cat, "big").join(","), RL.effortChoices(cat, "other").join(","), RL.effortChoices(null, "x").length, RL.effortChoices(cat, "mystery").length, RL.effortChoices(cat, "bare").length].join(" | "));
+    console.log([RL.validateValue(k, "max", [], cat, "small"), RL.validateValue(k, "max", [], cat, "big") === "", RL.validateValue(k, "high", [], cat, "other") === "", RL.validateValue(k, "ultra", [], cat, "mystery") === "", RL.validateValue(k, "ultra", [], cat, "bare") === ""].join(" | "));
+  ' "$DERIVE")
+  assert_eq "validateValue: effort against the catalog, free without one" "true | true | unknown effort 'ultra' for this backend (low, high, max) | true | true" "$(sed -n 1p <<< "$MOUT")"
+  assert_eq "effortChoices: the model's levels (empty kept), else the backend's, else none" "low | low,max | low,high,max | 0 | 0 | 0" "$(sed -n 2p <<< "$MOUT")"
+  assert_eq "validateValue: per model when listed; unknown capabilities accept anything" "unknown effort 'max' for model small (low) | true | true | true | true" "$(sed -n 3p <<< "$MOUT")"
+fi
+
 section "config robustness"
 R=$(new_repo r37); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
 cfgj() { (cd "$R" && bash "$S/config.sh" show --json | jq -c '{r: .effective.max_rounds, m: .effective.model, d: .effective.dir}'); }
@@ -1741,7 +1887,7 @@ if command -v node > /dev/null 2>&1; then
     const pr = { reviewer: "", reviewer_extra: "docs/r.md", coder: "docs/c.md", coder_extra: "" };
     console.log(RL.promptLabel(pr, "reviewer") + " | " + RL.promptLabel(pr, "coder") + " | " + RL.promptLabel(null, "coder"));
   ' "$DERIVE" "$(bash "$C" keys --json)")
-  assert_eq "groupKeys: loop, dashboard and roles groups" "loop:5 dashboard:4 roles:4" "$(sed -n 1p <<< "$NOUT")"
+  assert_eq "groupKeys: loop, dashboard and roles groups" "loop:6 dashboard:4 roles:4" "$(sed -n 1p <<< "$NOUT")"
   assert_eq "roleStatus: configured files and their existence" "false true true true false false" "$(sed -n 2p <<< "$NOUT")"
   assert_eq "roleStatus: a hidden value is flagged" "true" "$(sed -n 3p <<< "$NOUT")"
   assert_eq "placeholders: unique, uppercase, in order" "{{TASK}},{{ROUND}}" "$(sed -n 4p <<< "$NOUT")"

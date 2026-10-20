@@ -233,7 +233,7 @@ rl_config_files() {
 # (for a shared file: its top-level keys, then its providers.<provider>
 # section), REVIEW_LOOP_* env. Flags are applied by start.sh.
 rl_resolve_config() {
-  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false},"prompts":{"reviewer":"","reviewer_extra":"","coder":"","coder_extra":""}}'
+  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","effort":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false},"prompts":{"reviewer":"","reviewer_extra":"","coder":"","coder_extra":""}}'
   local cfg="$defaults" env_cfg label path kind file_cfg p merged
   p=$(rl_provider)
   while IFS=$'\t' read -r label path kind; do
@@ -259,6 +259,7 @@ rl_resolve_config() {
     --arg mr "${REVIEW_LOOP_MAX_ROUNDS:-}" \
     --arg be "${REVIEW_LOOP_BACKEND:-}" \
     --arg model "${REVIEW_LOOP_MODEL:-}" \
+    --arg effort "${REVIEW_LOOP_EFFORT:-}" \
     --arg usage "${REVIEW_LOOP_USAGE:-}" \
     --arg dopen "${REVIEW_LOOP_DASHBOARD_OPEN:-}" \
     --arg dout "${REVIEW_LOOP_DASHBOARD_OUT:-}" \
@@ -267,6 +268,7 @@ rl_resolve_config() {
      + (if $mr    != "" then {max_rounds: ($mr | tonumber)} else {} end)
      + (if $be    != "" then {backend: $be} else {} end)
      + (if $model != "" then {model: $model} else {} end)
+     + (if $effort != "" then {effort: $effort} else {} end)
      + (if $usage != "" then {usage: ($usage | ascii_downcase | IN("1","true","yes","on"))} else {} end)
      + (if $dopen != "" then {dashboard: {open: ($dopen | ascii_downcase | IN("1","true","yes","on"))}} else {} end)
      + (if $dout  != "" then {dashboard: {out: $dout}} else {} end)')
@@ -353,6 +355,44 @@ rl_coder_brief() {
     "MAX_ROUNDS=$(rl_state_get "$dir" max_rounds)" "ROOT=$root"
 }
 
+# rl_backend_models NAME -> the backend's model catalog as JSON (`<backend>.sh
+# --models`: models, efforts, defaults); an empty catalog when the backend has
+# none or fails, so callers can always read .models and .efforts.
+rl_backend_models() {
+  local out
+  if [ -f "$RL_BACKENDS_DIR/$1.sh" ] && out=$(bash "$RL_BACKENDS_DIR/$1.sh" --models 2>/dev/null) \
+     && jq -e '(.models | type == "array") and (.efforts | type == "array")' <<< "$out" > /dev/null 2>&1; then
+    printf '%s\n' "$out"
+  else
+    jq -cn --arg b "$1" '{backend: $b, source: null, models: [], efforts: [], default_model: null, default_effort: null}'
+  fi
+}
+
+# rl_effort_choices CATALOG MODEL -> JSON array: the listed MODEL's own efforts
+# (its empty list included: that model's capabilities are unknown, anything
+# goes), else the backend-wide list for a model that is not listed.
+rl_effort_choices() {
+  jq -c --arg m "$2" '((.models // []) | map(select(.id == $m)) | first) as $mm
+    | if $mm != null then ($mm.efforts // []) else (.efforts // []) end' <<< "$1"
+}
+
+# rl_check_effort BACKEND MODEL EFFORT -> 0 when EFFORT is allowed: empty, in
+# the list known for MODEL (or the backend when MODEL is not listed), or no
+# list is known at all. Otherwise prints why and returns 1.
+rl_check_effort() {
+  local be="$1" model="$2" effort="$3" cat choices
+  [ -n "$effort" ] || return 0
+  cat=$(rl_backend_models "$be"); choices=$(rl_effort_choices "$cat" "$model")
+  [ "$(jq 'length' <<< "$choices")" -gt 0 ] || return 0
+  jq -e --arg e "$effort" 'index($e)' <<< "$choices" > /dev/null && return 0
+  if [ -n "$model" ] && jq -e --arg m "$model" '(.models // []) | map(.id) | index($m)' <<< "$cat" > /dev/null; then
+    echo "unknown effort '$effort' for model $model (backend $be; available: $(jq -r 'join(" ")' <<< "$choices"))"
+  else
+    echo "unknown effort '$effort' for backend $be (available: $(jq -r 'join(" ")' <<< "$choices"))"
+  fi
+  return 1
+}
+
 # rl_config_source KEY -> label of the highest-precedence source that sets KEY
 # ("env", "<file label>", "<file label> (providers.<p>)" or "default").
 rl_config_source() {
@@ -360,7 +400,7 @@ rl_config_source() {
   p=$(rl_provider)
   case "$key" in
     dir) envname=REVIEW_LOOP_DIR ;; max_rounds) envname=REVIEW_LOOP_MAX_ROUNDS ;;
-    backend) envname=REVIEW_LOOP_BACKEND ;; model) envname=REVIEW_LOOP_MODEL ;;
+    backend) envname=REVIEW_LOOP_BACKEND ;; model) envname=REVIEW_LOOP_MODEL ;; effort) envname=REVIEW_LOOP_EFFORT ;;
     usage) envname=REVIEW_LOOP_USAGE ;; dashboard.open) envname=REVIEW_LOOP_DASHBOARD_OPEN ;;
     dashboard.out) envname=REVIEW_LOOP_DASHBOARD_OUT ;; *) envname="" ;;
   esac

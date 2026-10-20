@@ -6,13 +6,50 @@
 #   writes the agent's final message to OUTPUT_FILE (only on success) plus
 #   token usage to OUTPUT_FILE.usage.json when REVIEW_LOOP_USAGE=1 (Codex
 #   reports tokens, not cost).
+# Contract: codex.sh --models
+#   Prints the available models and reasoning efforts as JSON (see README
+#   "Reviewer backends"), from Codex's own model list ($CODEX_HOME/models_cache.json,
+#   fetched by the CLI) and the defaults in $CODEX_HOME/config.toml.
 # Env:
 #   REVIEW_LOOP_MODEL        model passed as `-m` (empty = codex default)
+#   REVIEW_LOOP_EFFORT       reasoning effort passed as `-c model_reasoning_effort=...`
+#                            (empty = codex default)
 #   REVIEW_LOOP_CODEX_FLAGS  extra flags; default "-s read-only --ephemeral".
 #                            Setting it REPLACES the default, so include a
 #                            sandbox flag, e.g. "-s workspace-write" to let the
 #                            reviewer run tests.
 set -euo pipefail
+
+if [ "${1:-}" = "--models" ]; then
+  CH="${CODEX_HOME:-$HOME/.codex}"
+  DEF_MODEL=""; DEF_EFFORT=""
+  if [ -f "$CH/config.toml" ]; then
+    DEF_MODEL=$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CH/config.toml" | head -1)
+    DEF_EFFORT=$(sed -n 's/^model_reasoning_effort[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CH/config.toml" | head -1)
+  fi
+  if [ -f "$CH/models_cache.json" ] && jq -e '.models | type == "array"' "$CH/models_cache.json" > /dev/null 2>&1; then
+    # Listed models in Codex's own order; efforts in their natural order.
+    jq -c --arg dm "$DEF_MODEL" --arg de "$DEF_EFFORT" --arg src "$CH/models_cache.json" '
+      ([.models[] | select((.visibility // "list") == "list")] | sort_by(.priority // 0)) as $m
+      | ([$m[] | .supported_reasoning_levels[]?.effort] | unique) as $all
+      | {backend: "codex", source: $src,
+         models: [$m[] | {id: .slug, label: (.display_name // .slug),
+                          efforts: [.supported_reasoning_levels[]?.effort],
+                          default_effort: (.default_reasoning_level // null),
+                          default: (if $dm != "" then .slug == $dm else . == $m[0] end)}],
+         efforts: [("minimal","low","medium","high","xhigh","max","ultra") | select(. as $e | $all | index($e))],
+         default_model: (if $dm != "" then $dm else ($m[0].slug // null) end),
+         default_effort: (if $de != "" then $de else null end)}' "$CH/models_cache.json"
+  else
+    # No cache: the capabilities are unknown, so no list is claimed (an empty
+    # efforts list means any typed value is accepted rather than refused).
+    jq -cn --arg dm "$DEF_MODEL" --arg de "$DEF_EFFORT" '{backend: "codex", source: null, models: [], efforts: [],
+      default_model: (if $dm != "" then $dm else null end), default_effort: (if $de != "" then $de else null end),
+      note: "no model list found (run codex once so it fetches ~/.codex/models_cache.json); model and effort names are passed through unchecked"}'
+  fi
+  exit 0
+fi
+
 PROMPT_FILE="$1"
 OUTPUT_FILE="$2"
 
@@ -26,6 +63,8 @@ EVENTS="$OUTPUT_FILE.events.jsonl"
 rm -f "$TMP" "$EVENTS"
 args=(exec --skip-git-repo-check --color never -o "$TMP")
 [ -n "${REVIEW_LOOP_MODEL:-}" ] && args+=(-m "$REVIEW_LOOP_MODEL")
+# -c takes TOML: the string value must be quoted.
+[ -n "${REVIEW_LOOP_EFFORT:-}" ] && args+=(-c "model_reasoning_effort=\"$REVIEW_LOOP_EFFORT\"")
 # shellcheck disable=SC2206
 extra=(${REVIEW_LOOP_CODEX_FLAGS:--s read-only --ephemeral})
 

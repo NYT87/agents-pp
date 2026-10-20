@@ -299,7 +299,18 @@ var RL = (function () {
   };
   const shq = v => /^[A-Za-z0-9_.,\/=:-]*$/.test(v) ? v : "'" + String(v).replace(/'/g, "'\\''") + "'";
   // Same rules as config.sh coerce(): '' when valid, else the problem.
-  function validateValue(k, raw, backends) {
+  // The efforts to offer for a model: the listed model's own levels (an empty
+  // list included: that model's capabilities are unknown, anything goes), else
+  // the backend-wide list for a model that is not listed.
+  function effortChoices(catalog, model) {
+    const m = ((catalog || {}).models || []).find(x => x && x.id === model);
+    if (m) return Array.isArray(m.efforts) ? m.efforts : [];
+    return Array.isArray((catalog || {}).efforts) ? catalog.efforts : [];
+  }
+  // catalog: the chosen backend's model catalog ({models, efforts}) when known,
+  // model: the chosen model; efforts are a closed list per model (or backend),
+  // models only a suggestion.
+  function validateValue(k, raw, backends, catalog, model) {
     raw = String(raw == null ? '' : raw);
     switch (k.type) {
       case 'integer':
@@ -311,6 +322,13 @@ var RL = (function () {
       default:
         if (k.key === 'backend') return (backends || []).includes(raw) ? '' : `unknown backend '${raw}'`;
         if (k.key === 'dir' && raw === '') return 'dir cannot be empty';
+        if (k.key === 'effort' && raw !== '') {
+          const ch = effortChoices(catalog, model);
+          if (ch.length && !ch.includes(raw)) {
+            const listed = ((catalog || {}).models || []).some(x => x && x.id === model);
+            return `unknown effort '${raw}' for ${listed ? 'model ' + model : 'this backend'} (${ch.join(', ')})`;
+          }
+        }
         return '';
     }
   }
@@ -456,7 +474,7 @@ var RL = (function () {
     return (tpl || 'default') + (extra ? ' + ' + extra : '');
   }
   return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute,
-    ROLES, groupKeys, roleStatus, placeholders, promptLabel };
+    ROLES, groupKeys, roleStatus, placeholders, promptLabel, effortChoices };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
 </script>
@@ -617,7 +635,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       <td><div class="task" title="${esc(l.task)}">${esc(l.task)}</div></td>
       <td>${chip(l.outcome)}</td>
       <td class="num">${l.roundCount} / ${l.st.max_rounds || '?'}</td>
-      <td class="opt">${esc(l.st.backend)}${l.st.model ? ' <span class="mono">' + esc(l.st.model) + '</span>' : ''}</td>
+      <td class="opt">${esc(l.st.backend)}${l.st.model ? ' <span class="mono">' + esc(l.st.model) + '</span>' : ''}${l.st.effort ? ' <span class="mono">@' + esc(l.st.effort) + '</span>' : ''}</td>
       <td class="num opt" title="${l.coderTimeState === 'complete' ? 'coder time, all rounds' : esc(fmtCoderTime(l, true))}">${fmtCoderTime(l)}</td>
       <td class="num opt" title="review time, all rounds">${l.reviewTime ? fmtDur(l.reviewTime) : '–'}</td>
       <td class="num opt">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No loops match.</td></tr>';
@@ -657,7 +675,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     $('#cfg-hint').textContent = (DATA.serve
       ? `Edit values and press Apply: changes are written through config.sh (provider "${show.provider || 'none'}"). Each value shows where it comes from; a value set by a higher-precedence file masks what you write, and config.sh warns about that.`
       : `Edit values, then copy the command or save the file. This is a static page: nothing is written until you run the command or save. Run "dashboard.sh --serve" to apply changes directly with validation.`)
-      + (show.redacted_user_config ? ' Values from your user configuration (~) and environment are hidden in this static page so it can be shared; use --with-user-config or --serve to see them.' : '');
+      + (show.redacted_user_config ? ' Values from your user configuration (~) and environment are hidden in this static page so it can be shared (the backends\' default model and effort too); use --with-user-config or --serve to see them.' : '');
     $('#cfg-scope').innerHTML = `
       <label>Write to <select id="cfg-scope-sel">
         <option value="project|shared">project shared file</option>
@@ -693,7 +711,18 @@ if (typeof module !== 'undefined') module.exports = RL;
       const v = sc.form[k.key] ?? '';
       const removed = sc.remove.has(k.key);
       let input;
+      const cat = (CFG.models || {})[sc.form.backend] || { models: [], efforts: [] };
       if (k.key === 'backend') input = `<select data-key="${k.key}" ${removed ? 'disabled' : ''}>${(CFG.backends || []).map(b => `<option ${b === v ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(v) ? '' : `<option selected>${esc(v)}</option>`}</select>`;
+      else if (k.key === 'model') input = `<input type="text" data-key="${k.key}" value="${esc(v)}" list="rl-models" placeholder="backend default" ${removed ? 'disabled' : ''}>`
+        + `<datalist id="rl-models">${(cat.models || []).map(m => `<option value="${esc(m.id)}">${esc(m.label || m.id)}${m.default ? ' (default)' : ''}</option>`).join('')}</datalist>`;
+      else if (k.key === 'effort') {
+        // Levels of the chosen model when it is listed, else the backend's.
+        const ch = RL.effortChoices(cat, sc.form.model), lm = (cat.models || []).find(x => x && x.id === sc.form.model);
+        const def = (lm && lm.default_effort) || cat.default_effort;
+        input = ch.length
+          ? `<select data-key="${k.key}" ${removed ? 'disabled' : ''}><option value="" ${v === '' ? 'selected' : ''}>default${def ? ' (' + esc(def) + ')' : ''}</option>${ch.map(e => `<option value="${esc(e)}" ${e === v ? 'selected' : ''}>${esc(e)}</option>`).join('')}${ch.includes(v) || v === '' ? '' : `<option value="${esc(v)}" selected>${esc(v)} (not listed)</option>`}</select>`
+          : `<input type="text" data-key="${k.key}" value="${esc(v)}" placeholder="backend default" ${removed ? 'disabled' : ''}>`;
+      }
       else if (k.type === 'boolean') input = `<span class="check"><input type="checkbox" data-key="${k.key}" ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}> <span>${/^(1|true|yes|y|on)$/i.test(v) ? 'on' : 'off'}</span></span>`;
       else if (k.type === 'integer') input = `<input type="number" min="1" step="1" data-key="${k.key}" value="${esc(v)}" ${removed ? 'disabled' : ''}>`;
       else input = `<input type="text" data-key="${k.key}" value="${esc(v)}" placeholder="${k.type === 'list' ? 'comma-separated' : ''}" ${removed ? 'disabled' : ''}>`;
@@ -727,8 +756,10 @@ if (typeof module !== 'undefined') module.exports = RL;
         ? `<div class="role-cards">${RL.ROLES.map(roleCard).join('')}</div><div class="cfg-grid">${g.keys.filter(k => !roleKeys.has(k.key)).map(rowHtml).join('')}</div>`
         : `<div class="cfg-grid">${g.keys.map(rowHtml).join('')}</div>`)).join('');
     $('#cfg-grid').querySelectorAll('[data-key]').forEach(el => {
-      const h = () => { sc.form[el.dataset.key] = el.type === 'checkbox' ? String(el.checked) : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; const fb = $(`[data-force="${el.dataset.key}"]`); if (fb) fb.style.display = sc.form[el.dataset.key] === sc.initial[el.dataset.key] ? '' : 'none'; cfgUpdate(); };
-      el.oninput = h; el.onchange = h;
+      const h = () => { sc.form[el.dataset.key] = el.type === 'checkbox' ? String(el.checked) : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; const fb = $(`[data-force="${el.dataset.key}"]`); if (fb) fb.style.display = sc.form[el.dataset.key] === sc.initial[el.dataset.key] ? '' : 'none'; if (el.dataset.key === 'backend') cfgRenderRows(); cfgUpdate(); };
+      // The effort choices follow the model: re-render once a model edit is
+      // committed (on change, not per keystroke, so typing keeps its focus).
+      el.oninput = h; el.onchange = el.dataset.key === 'model' ? () => { h(); cfgRenderRows(); cfgUpdate(); } : h;
     });
     $('#cfg-grid').querySelectorAll('[data-unset]').forEach(b => b.onclick = () => { const k = b.dataset.unset; if (sc.remove.has(k)) sc.remove.delete(k); else { sc.remove.add(k); sc.force.delete(k); } cfgRenderRows(); cfgUpdate(); });
     $('#cfg-grid').querySelectorAll('[data-force]').forEach(b => b.onclick = () => { const k = b.dataset.force; if (sc.force.has(k)) sc.force.delete(k); else sc.force.add(k); b.textContent = sc.force.has(k) ? 'writing' : 'write'; cfgUpdate(); });
@@ -736,7 +767,8 @@ if (typeof module !== 'undefined') module.exports = RL;
   function cfgChanges() { return RL.diffConfig(CFG.keys || [], CFG.show.effective || {}, cfgState.form, { force: [...cfgState.force], remove: [...cfgState.remove] }); }
   function cfgErrors(ch) {
     const errs = {};
-    for (const k of CFG.keys || []) if (k.key in ch.set) { const e = RL.validateValue(k, ch.set[k.key], CFG.backends); if (e) errs[k.key] = e; }
+    const cat = (CFG.models || {})[cfgState.form.backend] || null;
+    for (const k of CFG.keys || []) if (k.key in ch.set) { const e = RL.validateValue(k, ch.set[k.key], CFG.backends, cat, cfgState.form.model); if (e) errs[k.key] = e; }
     return errs;
   }
   function cfgUpdate() {
@@ -836,7 +868,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     }).join('');
     d.innerHTML = `<div class="card">
       <div class="detail-head"><h2>${esc(l.task)}</h2>${chip(l.outcome)}<span class="spacer"></span><a class="navbtn" href="#/">All loops</a></div>
-      <div class="kv"><span>id <b class="mono">${esc(l.id)}</b></span><span>backend <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}</b></span>
+      <div class="kv"><span>id <b class="mono">${esc(l.id)}</b></span><span>backend <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}${l.st.effort ? ' @ ' + esc(l.st.effort) : ''}</b></span>
         <span>rounds <b>${l.roundCount} / ${l.st.max_rounds}</b>${l.extendedRounds ? ` <span class="src">(extended +${l.extendedRounds})</span>` : ''}</span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
         ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
         <span>coder time <b>${fmtCoderTime(l, true)}</b></span><span>review time <b>${fmtDur(l.reviewTime)}</b></span>
