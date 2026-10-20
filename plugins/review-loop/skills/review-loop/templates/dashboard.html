@@ -133,6 +133,9 @@
   .role-status .missing { color: var(--critical); font-weight: 600; }
   details.role-tpl { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
   details.role-tpl pre { max-height: 240px; overflow: auto; font-size: 11px; background: var(--page); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; margin: 6px 0 0; }
+  .start-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 14px; margin: 8px 0; }
+  #start-task { width: 100%; min-height: 72px; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; resize: vertical; box-sizing: border-box; }
+  .start-next { font-size: 13px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
   details.cfg-files { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
   details.cfg-files code { font-size: 11px; }
   @media (max-width: 640px) { .task { max-width: 200px; } th.opt, td.opt { display: none; } }
@@ -146,6 +149,7 @@
     <span class="spacer"></span>
     <nav class="nav">
       <a href="#/" class="navbtn" id="nav-home">Loops</a>
+      <a href="#/start" class="navbtn" id="nav-start">Start a loop</a>
       <a href="#/config" class="navbtn" id="nav-config">Configuration</a>
       <button id="theme" type="button" title="Toggle theme">Theme</button>
     </nav>
@@ -200,6 +204,21 @@
   <section class="view" id="view-loop">
     <div class="crumbs"><a href="#/">← All loops</a></div>
     <div id="detail"></div>
+  </section>
+
+  <!-- Page 4: start a loop -->
+  <section class="view" id="view-start">
+    <div class="crumbs"><a href="#/">← All loops</a></div>
+    <div class="card" id="card-start">
+      <h2>Start a loop</h2>
+      <div class="hint" id="start-hint"></div>
+      <div class="cfg-row"><label for="start-task">Task — what the coder should do</label><textarea id="start-task" placeholder="Add a divide() function with ValueError on zero, plus tests"></textarea></div>
+      <div class="start-grid" id="start-fields"></div>
+      <div class="cfg-actions" id="start-actions"></div>
+      <pre class="cmd" id="start-cmd"></pre>
+      <div class="cfg-out" id="start-out"></div>
+      <div class="start-next" id="start-next" style="display:none"></div>
+    </div>
   </section>
 
   <!-- Page 3: configuration -->
@@ -297,7 +316,7 @@ var RL = (function () {
     if (sc.mode === 'file') f.push('--provider-file=' + sc.provider);
     return f;
   };
-  const shq = v => /^[A-Za-z0-9_.,\/=:-]*$/.test(v) ? v : "'" + String(v).replace(/'/g, "'\\''") + "'";
+  const shq = v => v === '' ? "''" : /^[A-Za-z0-9_.,\/=:-]*$/.test(v) ? v : "'" + String(v).replace(/'/g, "'\\''") + "'";
   // Same rules as config.sh coerce(): '' when valid, else the problem.
   // The efforts to offer for a model: the listed model's own levels (an empty
   // list included: that model's capabilities are unknown, anything goes), else
@@ -340,6 +359,42 @@ var RL = (function () {
     if (sets.length) out.push(['bash', shq(script), 'set', ...scopeFlags(sc), ...sets.map(k => shq(k + '=' + changes.set[k]))].join(' '));
     if ((changes.unset || []).length) out.push(['bash', shq(script), 'unset', ...scopeFlags(sc), ...changes.unset.map(shq)].join(' '));
     return out.join('\n');
+  }
+  // The exact start.sh command for the "Start a loop" form: only the fields
+  // that differ from the effective configuration become flags; the task goes
+  // after "--" so a task beginning with a dash is never taken as a flag.
+  // What the form asks start.sh for, relative to the effective configuration:
+  // a field equal to the configuration is left out (the configuration applies);
+  // one that differs is sent, and a model or effort cleared to "backend
+  // default" is sent as "" (start.sh takes an explicit empty flag as exactly
+  // that). The POST body and the shown command are built from the same set.
+  function startPayload(f, effective) {
+    const e = effective || {}, out = { task: String((f && f.task) || '').trim() };
+    if (f.backend && f.backend !== e.backend) out.backend = f.backend;
+    if ((f.model || '') !== (e.model || '')) out.model = f.model || '';
+    if ((f.effort || '') !== (e.effort || '')) out.effort = f.effort || '';
+    if (f.max_rounds !== '' && f.max_rounds != null && String(f.max_rounds) !== String(e.max_rounds == null ? '' : e.max_rounds)) out.max_rounds = Number(f.max_rounds);
+    if (f.usage != null && !!f.usage !== !!e.usage) out.usage = !!f.usage;
+    return out;
+  }
+  function startCommand(script, f, effective) {
+    const p = startPayload(f, effective);
+    if (!p.task) return '';
+    const out = ['bash', shq(script)];
+    if ('backend' in p) out.push('--backend', shq(p.backend));
+    if ('model' in p) out.push('--model', shq(p.model));
+    if ('effort' in p) out.push('--effort', shq(p.effort));
+    if ('max_rounds' in p) out.push('--max-rounds', shq(String(p.max_rounds)));
+    if ('usage' in p) out.push(p.usage ? '--usage' : '--no-usage');
+    out.push('--', shq(p.task));
+    return out.join(' ');
+  }
+  // The active loop of THIS project among the scanned loops (a storage dir can
+  // be shared): a loop records its root at start; one without a root predates
+  // that and is taken as this project's.
+  function activeLoopFor(loops, root) {
+    const same = (a, b) => String(a || '').replace(/\/+$/, '') === String(b || '').replace(/\/+$/, '');
+    return (loops || []).map(deriveLoop).find(l => l.st && l.st.active && (!l.st.root || same(l.st.root, root))) || null;
   }
   // Changes = keys the user edited (form differs from the initial effective
   // value) plus keys explicitly forced ("write" even when equal), minus keys
@@ -426,12 +481,14 @@ var RL = (function () {
     const stringify = d => JSON.stringify(d, null, 2).replace(re, '$1');
     return { doc, stringify, nonce };
   }
-  // Hash routes: "#/" (stats + loops), "#/loop/<id>" (one loop), "#/config".
+  // Hash routes: "#/" (stats + loops), "#/loop/<id>" (one loop), "#/start"
+  // (start a loop), "#/config".
   // A bare "#<loop-id>" is the older deep-link form and still opens the loop.
   function parseRoute(hash) {
     let h;
     try { h = decodeURIComponent((hash || '').replace(/^#/, '')); } catch (e) { return { view: 'home' }; }
     if (h === '/config' || h === 'config') return { view: 'config' };
+    if (h === '/start' || h === 'start') return { view: 'start' };
     let m = /^\/loop\/(.+)$/.exec(h);
     if (m) return { view: 'loop', id: m[1] };
     if (/^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(h)) return { view: 'loop', id: h };
@@ -474,7 +531,7 @@ var RL = (function () {
     return (tpl || 'default') + (extra ? ' + ' + extra : '');
   }
   return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute,
-    ROLES, groupKeys, roleStatus, placeholders, promptLabel, effortChoices };
+    ROLES, groupKeys, roleStatus, placeholders, promptLabel, effortChoices, startPayload, startCommand, activeLoopFor };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
 </script>
@@ -644,6 +701,7 @@ if (typeof module !== 'undefined') module.exports = RL;
 
   // ── configuration panel ──────────────────────────────────────────────────
   const CFG = DATA.config || {};
+  let startReady = false;
   const cfgState = { scope: 'project', mode: 'shared', provider: '', form: {}, initial: {}, force: new Set(), remove: new Set() };
   function cfgInit() {
     const show = CFG.show;
@@ -828,6 +886,78 @@ if (typeof module !== 'undefined') module.exports = RL;
     cfgOut(`downloaded ${name}; move it to ${f.path}`, 'ok');
   }
 
+  // ── Start a loop ─────────────────────────────────────────────────────────
+  // The form is prefilled from the effective configuration; the model and
+  // effort choices follow the chosen backend (and model), like the
+  // configuration page. A served page starts the loop through /api/start
+  // (start.sh with a validated argv); a static page shows the command to run.
+  const startState = { task: '', backend: '', model: '', effort: '', max_rounds: '', usage: false };
+  const startScript = () => (CFG.script || '').replace(/config\.sh$/, 'start.sh');
+  const activeLoop = () => RL.activeLoopFor(DATA.loops, DATA.root);
+  function startInit() {
+    const eff = (CFG.show || {}).effective || {};
+    Object.assign(startState, { backend: eff.backend || '', model: eff.model || '', effort: eff.effort || '', max_rounds: eff.max_rounds == null ? '' : String(eff.max_rounds), usage: !!eff.usage });
+    const t = $('#start-task'); t.value = startState.task; t.oninput = () => { startState.task = t.value; startUpdate(); };
+    $('#start-hint').textContent = DATA.serve
+      ? 'Describe the task and press Start: the loop is created here (start.sh), then any Claude Code session in this project is held to it by the Stop hook until the reviewer approves.'
+      : 'Describe the task; this static page shows the start.sh command to run in the project (run "dashboard.sh --serve" to start loops from here).';
+    if (activeLoop()) startOut(`a loop is already active in this project (${activeLoop().id}); cancel it first`, '');
+    startRenderFields();
+    $('#start-actions').innerHTML = (DATA.serve ? '<button type="button" class="primary" id="start-go">Start</button>' : '')
+      + '<button type="button" id="start-copy">Copy command</button>';
+    $('#start-go') && ($('#start-go').onclick = startGo);
+    $('#start-copy').onclick = () => { const c = $('#start-cmd').textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => startOut('command copied', 'ok'), () => startOut('copy failed; select the command and copy it manually', 'err')); };
+    startUpdate();
+  }
+  function startRenderFields() {
+    const st = startState, eff = (CFG.show || {}).effective || {};
+    // An empty backend means "inherit the configuration" (on a shareable page
+    // the configured value may be hidden): offered as its own option so the
+    // select never shows a backend other than the one that will run.
+    const cat = (CFG.models || {})[st.backend || eff.backend] || { models: [], efforts: [] };
+    const ch = RL.effortChoices(cat, st.model), lm = (cat.models || []).find(x => x && x.id === st.model);
+    const def = (lm && lm.default_effort) || cat.default_effort;
+    $('#start-fields').innerHTML = `
+      <div class="cfg-row"><label>Backend</label><select data-start="backend"><option value="" ${st.backend === '' ? 'selected' : ''}>inherit configuration${eff.backend ? ' (' + esc(eff.backend) + ')' : ''}</option>${(CFG.backends || []).map(b => `<option ${b === st.backend ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(st.backend) || !st.backend ? '' : `<option selected>${esc(st.backend)}</option>`}</select></div>
+      <div class="cfg-row"><label>Model</label><input type="text" data-start="model" value="${esc(st.model)}" list="rl-start-models" placeholder="backend default"><datalist id="rl-start-models">${(cat.models || []).map(m => `<option value="${esc(m.id)}">${esc(m.label || m.id)}${m.default ? ' (default)' : ''}</option>`).join('')}</datalist></div>
+      <div class="cfg-row"><label>Effort</label>${ch.length
+        ? `<select data-start="effort"><option value="" ${st.effort === '' ? 'selected' : ''}>default${def ? ' (' + esc(def) + ')' : ''}</option>${ch.map(e => `<option value="${esc(e)}" ${e === st.effort ? 'selected' : ''}>${esc(e)}</option>`).join('')}${ch.includes(st.effort) || st.effort === '' ? '' : `<option value="${esc(st.effort)}" selected>${esc(st.effort)} (not listed)</option>`}</select>`
+        : `<input type="text" data-start="effort" value="${esc(st.effort)}" placeholder="backend default">`}</div>
+      <div class="cfg-row"><label>Max rounds</label><input type="number" min="1" step="1" data-start="max_rounds" value="${esc(st.max_rounds)}"></div>
+      <div class="cfg-row"><label>Usage tracking</label><span class="check"><input type="checkbox" data-start="usage" ${st.usage ? 'checked' : ''}> <span>${st.usage ? 'on' : 'off'}</span></span></div>`;
+    $('#start-fields').querySelectorAll('[data-start]').forEach(el => {
+      const h = () => { st[el.dataset.start] = el.type === 'checkbox' ? el.checked : el.value; if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off'; if (el.dataset.start === 'backend') startRenderFields(); startUpdate(); };
+      el.oninput = h; el.onchange = el.dataset.start === 'model' ? () => { h(); startRenderFields(); startUpdate(); } : h;
+    });
+  }
+  function startUpdate() {
+    const st = startState, eff = (CFG.show || {}).effective || {}, cat = (CFG.models || {})[st.backend || eff.backend] || null;
+    const active = activeLoop();
+    const effErr = RL.validateValue({ key: 'effort', type: 'string' }, st.effort, CFG.backends, cat, st.model);
+    const mrErr = st.max_rounds === '' ? '' : RL.validateValue({ key: 'max_rounds', type: 'integer' }, st.max_rounds, CFG.backends);
+    const problem = !st.task.trim() ? '# describe the task' : active ? `# a loop is already active (${active.id}); cancel it first (/review-cancel)` : effErr ? '# fix: ' + effErr : mrErr ? '# fix: ' + mrErr : '';
+    $('#start-cmd').textContent = problem || RL.startCommand(startScript(), st, eff);
+    const ok = !problem;
+    const go = $('#start-go'); if (go) go.disabled = !ok;
+    $('#start-copy').disabled = !ok;
+  }
+  function startOut(text, cls) { const o = $('#start-out'); o.textContent = text; o.className = 'cfg-out ' + (cls || ''); }
+  async function startGo() {
+    const st = startState;
+    startOut('starting…', ''); $('#start-next').style.display = 'none';
+    try {
+      const r = await fetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RL-Token': DATA.serve.token },
+        body: JSON.stringify(RL.startPayload(st, (CFG.show || {}).effective || {})) });
+      const j = await r.json();
+      startOut(j.output || (j.ok ? 'started' : 'failed'), j.ok ? 'ok' : 'err');
+      if (j.ok) {
+        const n = $('#start-next'); n.style.display = '';
+        n.innerHTML = `<b>Loop ${esc(j.loop_id || '')} started.</b> Next: open Claude Code in <span class="mono">${esc(j.root || DATA.root)}</span> and send any message — the Stop hook keeps the coder on this task until the reviewer approves. Opening the loop's page…`;
+        setTimeout(() => { if (j.loop_id) location.hash = '#/loop/' + encodeURIComponent(j.loop_id); location.reload(); }, 2500);
+      }
+    } catch (e) { startOut('request failed: ' + e, 'err'); }
+  }
+
   // Navigation: every page is a hash route, so links are shareable and the
   // browser's back button works.
   function select(id) { location.hash = '#/loop/' + encodeURIComponent(id); }
@@ -835,13 +965,15 @@ if (typeof module !== 'undefined') module.exports = RL;
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
     $('#nav-home').classList.toggle('active', name === 'home' || name === 'loop');
     $('#nav-config').classList.toggle('active', name === 'config');
-    document.title = name === 'config' ? 'Review loops · configuration' : name === 'loop' && selected ? 'Review loop ' + selected : 'Review loops';
+    $('#nav-start').classList.toggle('active', name === 'start');
+    document.title = name === 'config' ? 'Review loops · configuration' : name === 'start' ? 'Review loops · start a loop' : name === 'loop' && selected ? 'Review loop ' + selected : 'Review loops';
   }
   let cfgReady = false;
   function route() {
     const r = RL.parseRoute(location.hash);
     if (r.view === 'loop') { selected = r.id; showView('loop'); renderDetail(); }
     else if (r.view === 'config') { showView('config'); if (!cfgReady) { cfgInit(); cfgReady = true; } }
+    else if (r.view === 'start') { showView('start'); if (!startReady) { startInit(); startReady = true; } }
     else { selected = null; showView('home'); render(); }
     window.scrollTo(0, 0);
   }

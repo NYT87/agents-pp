@@ -13,8 +13,9 @@ Usage: start.sh [options] <task description>
 
 Options:
   --backend NAME     reviewer backend (codex, claude, ... see scripts/backends/)
-  --model MODEL      model passed to the backend (empty = backend default; list: config.sh models)
-  --effort LEVEL     reasoning effort passed to the backend (empty = backend default)
+  --model MODEL      model passed to the backend (list: config.sh models); --model ""
+                     means the backend default even when the config sets one
+  --effort LEVEL     reasoning effort passed to the backend; --effort "" likewise
   --max-rounds N     stop after N review rounds without approval (default 5)
   --dir DIR          storage dir for loop folders (default .review-loop)
   --usage            record token usage/cost per round and agent (default: off)
@@ -39,17 +40,17 @@ Config precedence: flags > REVIEW_LOOP_* env > ./.<provider>/review-loop.json
 HELP
 }
 
-FLAG_BACKEND="" FLAG_MODEL="" FLAG_EFFORT="" FLAG_MAX="" FLAG_DIR="" FLAG_SESSION="" FLAG_USAGE="" FORCE=0 GIT_EXCLUDE=0
+FLAG_BACKEND="" FLAG_MODEL="" FLAG_EFFORT="" FLAG_MODEL_SET=0 FLAG_EFFORT_SET=0 FLAG_MAX="" FLAG_DIR="" FLAG_SESSION="" FLAG_USAGE="" FORCE=0 GIT_EXCLUDE=0
 FLAG_P_REVIEWER="" FLAG_P_REVIEWER_EXTRA="" FLAG_P_CODER="" FLAG_P_CODER_EXTRA=""
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --backend) FLAG_BACKEND="${2:-}"; shift 2 ;;
     --backend=*) FLAG_BACKEND="${1#*=}"; shift ;;
-    --model) FLAG_MODEL="${2:-}"; shift 2 ;;
-    --model=*) FLAG_MODEL="${1#*=}"; shift ;;
-    --effort) FLAG_EFFORT="${2:-}"; shift 2 ;;
-    --effort=*) FLAG_EFFORT="${1#*=}"; shift ;;
+    --model) FLAG_MODEL="${2:-}"; FLAG_MODEL_SET=1; shift 2 ;;
+    --model=*) FLAG_MODEL="${1#*=}"; FLAG_MODEL_SET=1; shift ;;
+    --effort) FLAG_EFFORT="${2:-}"; FLAG_EFFORT_SET=1; shift 2 ;;
+    --effort=*) FLAG_EFFORT="${1#*=}"; FLAG_EFFORT_SET=1; shift ;;
     --max-rounds) FLAG_MAX="${2:-}"; shift 2 ;;
     --max-rounds=*) FLAG_MAX="${1#*=}"; shift ;;
     --dir) FLAG_DIR="${2:-}"; shift 2 ;;
@@ -91,10 +92,12 @@ if rl_load_loop; then
 fi
 
 CFG=$(rl_resolve_config)
-CFG=$(jq -c --arg be "$FLAG_BACKEND" --arg model "$FLAG_MODEL" --arg effort "$FLAG_EFFORT" --arg mr "$FLAG_MAX" --arg dir "$FLAG_DIR" --arg usage "$FLAG_USAGE" '
+# --model / --effort given at all (even empty) override the configuration: an
+# explicit empty value means the backend default.
+CFG=$(jq -c --arg be "$FLAG_BACKEND" --arg model "$FLAG_MODEL" --argjson mset "$FLAG_MODEL_SET" --arg effort "$FLAG_EFFORT" --argjson eset "$FLAG_EFFORT_SET" --arg mr "$FLAG_MAX" --arg dir "$FLAG_DIR" --arg usage "$FLAG_USAGE" '
   . + (if $be != "" then {backend: $be} else {} end)
-    + (if $model != "" then {model: $model} else {} end)
-    + (if $effort != "" then {effort: $effort} else {} end)
+    + (if $mset == 1 then {model: $model} else {} end)
+    + (if $eset == 1 then {effort: $effort} else {} end)
     + (if $mr != "" then {max_rounds: ($mr | tonumber)} else {} end)
     + (if $dir != "" then {dir: $dir} else {} end)
     + (if $usage != "" then {usage: ($usage == "true")} else {} end)' <<< "$CFG")

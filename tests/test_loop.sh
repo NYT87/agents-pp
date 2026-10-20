@@ -1385,9 +1385,9 @@ if command -v node > /dev/null 2>&1; then
     const RL = require(process.argv[1]);
     const r = h => { const x = RL.parseRoute(h); return x.view + (x.id ? ":" + x.id : ""); };
     console.log([r(""), r("#"), r("#/"), r("#/config"), r("#config"), r("#/loop/20261015-120000-abcdef"), r("#20261015-120000-abcdef"),
-      r("#/loop/with%20space"), r("#/nope"), r("#/loop/"), r("#/loop/%E0%A4%A"), r("#%")].join("|"));
+      r("#/loop/with%20space"), r("#/nope"), r("#/loop/"), r("#/loop/%E0%A4%A"), r("#%"), r("#/start"), r("#start")].join("|"));
   ' "$DERIVE")
-  assert_eq "parseRoute: home, config, loop and legacy deep links" "home|home|home|config|config|loop:20261015-120000-abcdef|loop:20261015-120000-abcdef|loop:with space|home|home|home|home" "$ROUT"
+  assert_eq "parseRoute: home, config, start, loop and legacy deep links" "home|home|home|config|config|loop:20261015-120000-abcdef|loop:20261015-120000-abcdef|loop:with space|home|home|home|home|start|start" "$ROUT"
   assert_contains "fmtDur never rounds up" "59s|1m 30s|2m|1h 02m|59m 59s|–|" "$OUT"
   assert_contains "partial 90s shows an honest lower bound" "|≥ 1m 30s*|at least 1m 30s (1 of 2 rounds recorded)|2m 30s|–" "$OUT"
   assert_contains "chart minutes floor (94s -> 1.5, never 1.6)" "1.5,1.6,0,0,0" "$OUT"
@@ -1415,7 +1415,7 @@ CABS="$(cd "$(dirname "$C")" && pwd)/config.sh"
 assert_eq "dashboard embeds the config.sh path" "$CABS" "$(jq -r .config.script <<< "$D")"
 assert_eq "static page has no serve token" "null" "$(jq .serve <<< "$D")"
 H=$(cat "$R/.review-loop/dashboard.html")
-for v in view-home view-loop view-config; do assert_contains "page has the $v section" "id=\"$v\"" "$H"; done
+for v in view-home view-loop view-start view-config; do assert_contains "page has the $v section" "id=\"$v\"" "$H"; done
 assert_contains "header links to the configuration page" 'href="#/config"' "$H"
 assert_contains "loop page links back to all loops" '← All loops' "$H"
 assert_eq "configuration card lives only in the config view" "1" "$(printf '%s' "$H" | grep -c 'id="card-config"')"
@@ -1598,6 +1598,44 @@ if command -v python3 > /dev/null 2>&1 && command -v curl > /dev/null 2>&1; then
   assert_contains "serve: set and unset of the same key rejected" "400" "$(post '{"set":{"max_rounds":"6"},"unset":["max_rounds"]}')"
   assert_contains "serve: non-scalar value rejected" "400" "$(post '{"set":{"max_rounds":{"a":1}}}')"
   assert_contains "serve: page says where changes go" "applied with: bash $CABS" "$(cat "$TMP/serve.log")"
+  # starting a loop from the page: start.sh with a validated argv, the task after "--"
+  pstart() { curl -s -w '\n%{http_code}' -X POST "http://127.0.0.1:$PORT/api/start" -H "X-RL-Token: ${2:-$TOKEN}" -H 'Content-Type: application/json' -d "$1"; }
+  assert_contains "start: bad token rejected" "403" "$(pstart '{"task":"x"}' nope)"
+  assert_no_file "start: bad token starts nothing" "$R/.claude/review-loop.active"
+  assert_contains "start: empty task rejected" "400" "$(pstart '{"task":"   "}')"
+  assert_contains "start: unknown backend rejected" "400" "$(pstart '{"task":"t","backend":"../x"}')"
+  assert_contains "start: control characters in the model rejected" "400" "$(pstart '{"task":"t","model":"a\nb"}')"
+  assert_contains "start: bad max_rounds rejected" "400" "$(pstart '{"task":"t","max_rounds":"0"}')"
+  assert_contains "start: an effort the model lacks is refused by start.sh" "unknown effort 'max' for model fake-fast" "$(pstart '{"task":"t","backend":"fake","model":"fake-fast","effort":"max"}')"
+  assert_contains "start: start.sh refusals come back as 422" "422" "$(pstart '{"task":"t","backend":"fake","model":"fake-fast","effort":"max"}')"
+  assert_no_file "start: nothing started so far" "$R/.claude/review-loop.active"
+  OUT=$(pstart '{"task":"--looks-like-a-flag: add '"'"'quotes'"'"' & $vars; done","backend":"fake","model":"fake-smart","effort":"max","max_rounds":2,"usage":true}')
+  assert_contains "start: loop started" "Review loop started" "$OUT"
+  assert_contains "start: 200" "200" "$OUT"
+  LS=$(pointer "$R")
+  assert_contains "start: loop id returned" "\"loop_id\": \"$(basename "$LS")\"" "$OUT"
+  assert_eq "start: the task is stored verbatim" "--looks-like-a-flag: add 'quotes' & \$vars; done" "$(cat "$LS/task.md")"
+  assert_eq "start: fields reach the loop" "fake fake-smart max 2 true" "$(jq -r '"\(.backend) \(.model) \(.effort) \(.max_rounds) \(.usage)"' "$LS/state.json")"
+  assert_eq "start: no session bound yet (the next Claude session is)" "null" "$(jq .session_id "$LS/state.json")"
+  assert_contains "start: a second loop is refused while one is active" "already active" "$(pstart '{"task":"another"}')"
+  (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+  # "" clears a configured model/effort (backend default); absent keeps the configuration
+  (cd "$R" && bash "$C" set model=fake-smart effort=max > /dev/null)
+  pstart '{"task":"keep the config"}' > /dev/null; LS=$(pointer "$R")
+  assert_eq "start: absent model/effort keep the configured values" "fake-smart max" "$(jq -r '"\(.model) \(.effort)"' "$LS/state.json")"
+  (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+  pstart '{"task":"clear them","model":"","effort":""}' > /dev/null; LS=$(pointer "$R")
+  assert_eq "start: empty model/effort override the configured values" " " "$(jq -r '"\(.model) \(.effort)"' "$LS/state.json")"
+  (cd "$R" && bash "$C" unset model effort > /dev/null)
+  assert_contains "start: the page shows the new loop after reload" "$(basename "$LS")" "$(curl -s "http://127.0.0.1:$PORT/")"
+  (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+  # a loop stored outside the scanned dirs is scanned once it is started
+  (cd "$R" && bash "$C" set dir=live dashboard.dirs=archive > /dev/null)
+  OUT=$(pstart '{"task":"stored elsewhere"}'); LS=$(pointer "$R")
+  assert_contains "start: stored in the configured dir" "$R/live/" "$LS"
+  assert_contains "start: the refreshed page lists a loop stored outside the scanned dirs" "$(basename "$LS")" "$(curl -s "http://127.0.0.1:$PORT/")"
+  (cd "$R" && bash "$S/cancel.sh" > /dev/null); (cd "$R" && bash "$C" unset dir dashboard.dirs > /dev/null)
+  assert_contains "serve: log says where loops are created" "created with: bash $(cd "$(dirname "$C")" && pwd)/start.sh" "$(cat "$TMP/serve.log")"
   kill "$SPID" 2>/dev/null; wait "$SPID" 2>/dev/null
   assert_contains "serve: refuses a bad port" "invalid port" "$(cd "$R" && bash "$S/dashboard.sh" --serve --port abc 2>&1 || true)"
   # the configured output never carries the served page (token, user config).
@@ -1724,6 +1762,17 @@ assert_no_file "refused start creates no loop" "$R/.claude/review-loop.active"
 start "$R" --model fake-smart --effort max "task" > /dev/null; L=$(pointer "$R")
 assert_eq "start accepts a level the model supports" "fake-smart max" "$(jq -r '"\(.model) \(.effort)"' "$L/state.json")"
 (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+# an explicitly empty --model/--effort means the backend default, overriding the config
+(cd "$R" && bash "$C" set model=fake-smart effort=max > /dev/null)
+start "$R" "task" > /dev/null; L=$(pointer "$R")
+assert_eq "config model and effort apply without flags" "fake-smart max" "$(jq -r '"\(.model) \(.effort)"' "$L/state.json")"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+start "$R" --model "" --effort "" "task" > /dev/null; L=$(pointer "$R")
+assert_eq "--model '' --effort '' clear the configured values" " " "$(jq -r '"\(.model) \(.effort)"' "$L/state.json")"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+start "$R" --model= "task" > /dev/null; L=$(pointer "$R")
+assert_eq "--model= clears the model and keeps the configured effort" " max" "$(jq -r '"\(.model) \(.effort)"' "$L/state.json")"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null); (cd "$R" && bash "$C" unset model effort > /dev/null)
 OUT=$(start "$R" --effort ultra "task" 2>&1); RC=$?
 assert_eq "start refuses an effort the backend does not list" "1" "$RC"
 assert_contains "start names the available efforts" "unknown effort 'ultra' for backend fake (available: low high max)" "$OUT"
@@ -1787,6 +1836,33 @@ if command -v node > /dev/null 2>&1; then
   assert_eq "validateValue: effort against the catalog, free without one" "true | true | unknown effort 'ultra' for this backend (low, high, max) | true | true" "$(sed -n 1p <<< "$MOUT")"
   assert_eq "effortChoices: the model's levels (empty kept), else the backend's, else none" "low | low,max | low,high,max | 0 | 0 | 0" "$(sed -n 2p <<< "$MOUT")"
   assert_eq "validateValue: per model when listed; unknown capabilities accept anything" "unknown effort 'max' for model small (low) | true | true | true | true" "$(sed -n 3p <<< "$MOUT")"
+  SOUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const eff = { backend: "codex", model: "", effort: "", max_rounds: 5, usage: false };
+    console.log(RL.startCommand("/x/start.sh", { task: "  add a thing  ", backend: "codex", model: "", effort: "", max_rounds: "5", usage: false }, eff));
+    console.log(RL.startCommand("/x/start.sh", { task: "--not a flag; it'"'"'s $text", backend: "claude", model: "opus", effort: "high", max_rounds: "3", usage: true }, eff));
+    console.log(JSON.stringify(RL.startCommand("/x/start.sh", { task: "   " }, eff)));
+  ' "$DERIVE")
+  assert_eq "startCommand: only the task when nothing differs from the config" "bash /x/start.sh -- 'add a thing'" "$(sed -n 1p <<< "$SOUT")"
+  COUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const eff = { backend: "codex", model: "opus", effort: "high", max_rounds: 5, usage: true };
+    const f = { task: "t", backend: "codex", model: "", effort: "", max_rounds: "", usage: true };
+    console.log(RL.startCommand("/x/start.sh", f, eff));
+    console.log(JSON.stringify(RL.startPayload(f, eff)));
+    console.log(JSON.stringify(RL.startPayload({ task: "t", backend: "codex", model: "opus", effort: "high", max_rounds: "5", usage: true }, eff)));
+    const loops = [{ state: { loop_id: "a", active: true, root: "/other/project", rounds: [] }, files: [], task: "x" }, { state: { loop_id: "b", active: false, root: "/this/project", rounds: [] }, files: [], task: "y" }];
+    console.log(String(RL.activeLoopFor(loops, "/this/project")) + " | " + RL.activeLoopFor(loops, "/other/project/").id);
+    loops.push({ state: { loop_id: "c", active: true, rounds: [] }, files: [], task: "z" });
+    console.log(RL.activeLoopFor(loops, "/this/project").id);
+  ' "$DERIVE")
+  assert_eq "startCommand: cleared model/effort are explicit empty flags, quoted" "bash /x/start.sh --model '' --effort '' -- t" "$(sed -n 1p <<< "$COUT")"
+  assert_eq "startPayload: cleared fields sent as empty strings, unchanged ones omitted" '{"task":"t","model":"","effort":""}' "$(sed -n 2p <<< "$COUT")"
+  assert_eq "startPayload: nothing but the task when all equals the config" '{"task":"t"}' "$(sed -n 3p <<< "$COUT")"
+  assert_eq "activeLoopFor: another project'"'"'s active loop does not count, its own does" "null | a" "$(sed -n 4p <<< "$COUT")"
+  assert_eq "activeLoopFor: a loop without a recorded root counts as this project'"'"'s" "c" "$(sed -n 5p <<< "$COUT")"
+  assert_eq "startCommand: flags for what differs, task quoted after --" "bash /x/start.sh --backend claude --model opus --effort high --max-rounds 3 --usage -- '--not a flag; it'\\''s \$text'" "$(sed -n 2p <<< "$SOUT")"
+  assert_eq "startCommand: empty without a task" '""' "$(sed -n 3p <<< "$SOUT")"
 fi
 
 section "config robustness"
@@ -1861,6 +1937,10 @@ assert_eq "dashboard embeds the roles' prompt files" "true" "$(jq '.config.show.
 assert_contains "dashboard embeds the default reviewer template" "{{REVIEW_FORMAT}}" "$(jq -r .templates.reviewer <<< "$D")"
 assert_contains "dashboard embeds the default coder brief" "{{LOOP_DIR}}" "$(jq -r .templates.coder <<< "$D")"
 assert_contains "configuration page has the grouped container" 'class="cfg-groups" id="cfg-grid"' "$(cat "$R/.review-loop/dashboard.html")"
+assert_contains "the page has the start-a-loop view" 'class="view" id="view-start"' "$(cat "$R/.review-loop/dashboard.html")"
+assert_contains "header links to the start page" 'href="#/start"' "$(cat "$R/.review-loop/dashboard.html")"
+assert_eq "the start card lives only in the start view" "1" "$(grep -c 'id="card-start"' "$R/.review-loop/dashboard.html")"
+assert_contains "the start form offers an explicit inherit-configuration backend" 'inherit configuration' "$(cat "$R/.review-loop/dashboard.html")"
 mkdir -p "$HOME/.config/review-loop"; echo '{"prompts": {"coder": "SECRET-DIR/brief.md"}}' > "$HOME/.config/review-loop/config.json"
 (cd "$R" && bash "$S/dashboard.sh" > /dev/null)
 D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")

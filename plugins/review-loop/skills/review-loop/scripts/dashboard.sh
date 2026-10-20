@@ -199,6 +199,7 @@ if [ "$SERVE" = "1" ] && [ -z "$SERVE_TOKEN" ]; then
   echo "review-loop dashboard: serving on http://127.0.0.1:$PORT/ (Ctrl-C to stop)"
   echo "  static page (shareable, user config hidden): $OUT"
   echo "  changes made in the page are applied with: bash $RL_SCRIPTS_DIR/config.sh"
+  echo "  loops started from the page are created with: bash $RL_SCRIPTS_DIR/start.sh"
   if [ "$OPEN" = "1" ]; then
     if command -v open > /dev/null 2>&1; then open "http://127.0.0.1:$PORT/"
     elif command -v xdg-open > /dev/null 2>&1; then xdg-open "http://127.0.0.1:$PORT/"; fi
@@ -217,6 +218,7 @@ SCRIPTS = os.environ["REVIEW_LOOP_SERVE_SCRIPTS"]
 PORT = int(os.environ["REVIEW_LOOP_SERVE_PORT"])
 DIRS = [d for d in os.environ.get("REVIEW_LOOP_SERVE_DIRS", "").split("\n") if d]
 NAME_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_-]*$")
+BACKENDS_DIR = os.path.join(SCRIPTS, "backends")
 # The known configuration keys, from config.sh itself, so every key in a request
 # is checked before anything is written.
 KNOWN = set()
@@ -262,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path != "/api/config":
+        if self.path not in ("/api/config", "/api/start"):
             self._json(404, {"ok": False, "output": "not found"}); return
         if self.headers.get("X-RL-Token") != TOKEN:
             self._json(403, {"ok": False, "output": "bad token (reload the page)"}); return
@@ -271,6 +273,72 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(n).decode() or "{}")
         except Exception:
             self._json(400, {"ok": False, "output": "invalid JSON"}); return
+        if not isinstance(req, dict):
+            self._json(400, {"ok": False, "output": "bad payload"}); return
+        if self.path == "/api/start":
+            self._start(req); return
+        self._config(req)
+
+    # Start a loop: start.sh with an argv built strictly from validated fields
+    # (no shell); the task goes after "--" so it can never be read as a flag.
+    # start.sh itself refuses an active loop, an unknown backend or an effort
+    # the model does not support, and its message is returned as is.
+    def _start(self, req):
+        task = req.get("task")
+        if not isinstance(task, str) or not task.strip():
+            self._json(400, {"ok": False, "output": "the task is empty"}); return
+        if len(task) > 20000:
+            self._json(400, {"ok": False, "output": "the task is too long (max 20000 characters)"}); return
+        args = ["bash", os.path.join(SCRIPTS, "start.sh")]
+        backend = req.get("backend")
+        if backend not in (None, ""):
+            if not isinstance(backend, str) or not NAME_RE.match(backend) or not os.path.isfile(os.path.join(BACKENDS_DIR, backend + ".sh")):
+                self._json(400, {"ok": False, "output": "unknown backend %r" % (backend,)}); return
+            args += ["--backend", backend]
+        # model/effort: absent or null = keep the configuration; "" = the
+        # backend default even when the configuration sets one (start.sh
+        # treats an explicitly empty flag that way).
+        for key, flag in (("model", "--model"), ("effort", "--effort")):
+            v = req.get(key)
+            if v is None:
+                continue
+            if not isinstance(v, str) or len(v) > 200 or any(ord(c) < 32 for c in v):
+                self._json(400, {"ok": False, "output": "bad value for %s" % key}); return
+            args += [flag, v]
+        mr = req.get("max_rounds")
+        if mr not in (None, ""):
+            if isinstance(mr, bool) or not (isinstance(mr, int) or (isinstance(mr, str) and mr.isdigit())) or int(mr) < 1:
+                self._json(400, {"ok": False, "output": "max_rounds must be a positive integer"}); return
+            args += ["--max-rounds", str(int(mr))]
+        usage = req.get("usage")
+        if usage not in (None, "", True, False):
+            self._json(400, {"ok": False, "output": "bad value for usage"}); return
+        if usage is True:
+            args.append("--usage")
+        elif usage is False:
+            args.append("--no-usage")
+        args += ["--", task.strip()]
+        r = subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        if r.returncode == 0:
+            # The loop may be stored outside the scanned dirs (dir=live with
+            # dashboard.dirs=["archive"], say): scan its storage dir from now
+            # on, so the refreshed page (and the redirect to it) can show it.
+            try:
+                with open(os.path.join(ROOT, ".claude", "review-loop.active")) as f:
+                    storage = os.path.dirname(f.readline().strip().rstrip("/"))
+                known = {os.path.realpath(os.path.join(ROOT, d)) for d in DIRS}
+                if storage and os.path.realpath(storage) not in known:
+                    DIRS.append(storage)
+            except OSError:
+                pass
+        loop_id = None
+        for line in r.stdout.splitlines():
+            if line.strip().startswith("id:"):
+                loop_id = line.split(":", 1)[1].strip(); break
+        self._json(200 if r.returncode == 0 else 422, {"ok": r.returncode == 0, "output": out, "loop_id": loop_id, "root": ROOT})
+
+    def _config(self, req):
         # Build the config.sh argv strictly from validated fields (no shell).
         flags = []
         scope = req.get("scope", "project")
