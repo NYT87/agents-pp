@@ -1,0 +1,323 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-20T12:00:00Z",
+  "title": "Design System: review-loop dashboard",
+  "extensions": {
+    "colorMeta": {
+      "coder-blue": {
+        "role": "primary",
+        "displayName": "Coder Blue",
+        "canonical": "#2a78d6",
+        "tonalRamp": [
+          "oklch(15% 0.06 255)",
+          "oklch(26% 0.10 255)",
+          "oklch(37% 0.14 255)",
+          "oklch(48% 0.16 255)",
+          "oklch(58% 0.16 255)",
+          "oklch(70% 0.12 255)",
+          "oklch(82% 0.07 255)",
+          "oklch(95% 0.02 255)"
+        ]
+      },
+      "coder-blue-dark": {
+        "role": "primary",
+        "displayName": "Coder Blue (dark theme)",
+        "canonical": "#3987e5"
+      },
+      "reviewer-orange": {
+        "role": "secondary",
+        "displayName": "Reviewer Orange",
+        "canonical": "#eb6834",
+        "tonalRamp": [
+          "oklch(15% 0.05 40)",
+          "oklch(27% 0.09 40)",
+          "oklch(40% 0.13 40)",
+          "oklch(52% 0.16 40)",
+          "oklch(64% 0.18 40)",
+          "oklch(74% 0.13 40)",
+          "oklch(85% 0.07 40)",
+          "oklch(95% 0.02 40)"
+        ]
+      },
+      "reviewer-orange-dark": {
+        "role": "secondary",
+        "displayName": "Reviewer Orange (dark theme)",
+        "canonical": "#d95926"
+      },
+      "stone-page": {
+        "role": "neutral",
+        "displayName": "Stone Page",
+        "canonical": "#f9f9f7",
+        "tonalRamp": [
+          "#0d0d0d",
+          "#1a1a19",
+          "#2c2c2a",
+          "#52514e",
+          "#898781",
+          "#c3c2b7",
+          "#e1e0d9",
+          "#f9f9f7"
+        ]
+      },
+      "stone-surface": {
+        "role": "neutral",
+        "displayName": "Stone Surface",
+        "canonical": "#fcfcfb"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#0b0b0b"
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Ink Secondary",
+        "canonical": "#52514e"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#6b6a65"
+      },
+      "gridline": {
+        "role": "neutral",
+        "displayName": "Gridline",
+        "canonical": "#e1e0d9"
+      },
+      "axis": {
+        "role": "neutral",
+        "displayName": "Axis",
+        "canonical": "#c3c2b7"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgba(11,11,11,0.10)"
+      },
+      "hover-wash": {
+        "role": "neutral",
+        "displayName": "Hover Wash",
+        "canonical": "rgba(11,11,11,0.05)"
+      },
+      "night-page": {
+        "role": "neutral",
+        "displayName": "Night Page",
+        "canonical": "#0d0d0d"
+      },
+      "night-surface": {
+        "role": "neutral",
+        "displayName": "Night Surface",
+        "canonical": "#1a1a19"
+      },
+      "status-good": {
+        "role": "tertiary",
+        "displayName": "Approval Green",
+        "canonical": "#0ca30c"
+      },
+      "status-warning": {
+        "role": "tertiary",
+        "displayName": "Pause Amber",
+        "canonical": "#fab219"
+      },
+      "status-serious": {
+        "role": "tertiary",
+        "displayName": "Cap Coral",
+        "canonical": "#ec835a"
+      },
+      "status-critical": {
+        "role": "tertiary",
+        "displayName": "Failure Red",
+        "canonical": "#d03b3b"
+      },
+      "action": {
+        "role": "primary",
+        "displayName": "Ink Action",
+        "canonical": "#0b0b0b"
+      },
+      "night-action": {
+        "role": "primary",
+        "displayName": "Ink Action (dark theme)",
+        "canonical": "#ecebe6"
+      },
+      "night-muted": {
+        "role": "neutral",
+        "displayName": "Muted (dark theme)",
+        "canonical": "#969490"
+      },
+      "status-good-text": {
+        "role": "tertiary",
+        "displayName": "Approval Green text",
+        "canonical": "#0a7d0a"
+      },
+      "status-critical-text": {
+        "role": "tertiary",
+        "displayName": "Failure Red text",
+        "canonical": "#c22f2f"
+      }
+    },
+    "typographyMeta": {
+      "page-title": {
+        "displayName": "Page title",
+        "purpose": "Dashboard name in the header; used once."
+      },
+      "metric": {
+        "displayName": "Metric",
+        "purpose": "Stat tile values; the largest type on the page."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Loop name in the loop detail view."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card, round and role card headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base size for controls and running text."
+      },
+      "body-dense": {
+        "displayName": "Body dense",
+        "purpose": "Tables, filters, breadcrumbs, key-value rows, config labels."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Tile labels, hints, legends, chips, table headers, rendered markdown."
+      },
+      "eyebrow": {
+        "displayName": "Eyebrow",
+        "purpose": "Uppercase author label above document panes; config group headers."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Comment IDs, paths, commands and code: anything literally from the files."
+      }
+    },
+    "shadows": [
+      {
+        "name": "tooltip-lift",
+        "value": "0 4px 16px rgba(0,0,0,0.15)",
+        "purpose": "Fixed-position chart tooltip only; every other surface is flat."
+      }
+    ],
+    "motion": [],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "640px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Default control: plain stone surface with a hairline border.",
+      "html": "<button class=\"ds-btn\">Refresh models</button>",
+      "css": ".ds-btn { font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--ink, #0b0b0b); background: var(--surface, #fcfcfb); border: 1px solid var(--border, rgba(11,11,11,0.10)); border-radius: 6px; padding: 4px 10px; cursor: pointer; } .ds-btn:hover { background: var(--hover, rgba(11,11,11,0.05)); } .ds-btn:focus-visible { outline: 2px solid var(--action, #0b0b0b); outline-offset: 2px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Save/start action in the ink action colour.",
+      "html": "<button class=\"ds-btn-primary\">Start loop</button>",
+      "css": ".ds-btn-primary { font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--on-action, #fff); background: var(--action, #0b0b0b); border: 1px solid transparent; border-radius: 6px; padding: 4px 10px; cursor: pointer; } .ds-btn-primary:hover { opacity: .9; } .ds-btn-primary:focus-visible { outline: 2px solid var(--action, #0b0b0b); outline-offset: 2px; } .ds-btn-primary[disabled] { opacity: .5; cursor: default; }"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "nav-button-active",
+      "description": "Header route buttons; the current route is filled.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-navbtn ds-active\" href=\"#/\">Loops</a><a class=\"ds-navbtn\" href=\"#/start\">Start</a><a class=\"ds-navbtn\" href=\"#/config\">Configuration</a></nav>",
+      "css": ".ds-nav { display: flex; gap: 8px; align-items: center; font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; } .ds-navbtn { color: var(--ink, #0b0b0b); background: var(--surface, #fcfcfb); border: 1px solid var(--border, rgba(11,11,11,0.10)); border-radius: 6px; padding: 4px 10px; text-decoration: none; } .ds-navbtn:hover { background: var(--hover, rgba(11,11,11,0.05)); } .ds-navbtn:focus-visible { outline: 2px solid var(--action, #0b0b0b); outline-offset: 2px; } .ds-navbtn.ds-active { background: var(--action, #0b0b0b); color: var(--on-action, #fff); border-color: transparent; }"
+    },
+    {
+      "name": "Config Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled config input with its source file underneath.",
+      "html": "<div class=\"ds-field\"><label for=\"ds-max\">max_rounds</label><input id=\"ds-max\" type=\"number\" value=\"5\"><span class=\"ds-src\">./.review-loop.json</span></div>",
+      "css": ".ds-field { display: grid; gap: 3px; font: 13px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--ink, #0b0b0b); max-width: 300px; } .ds-field input { font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--ink, #0b0b0b); background: var(--surface, #fcfcfb); border: 1px solid var(--border, rgba(11,11,11,0.10)); border-radius: 6px; padding: 5px 8px; } .ds-field input:focus-visible { outline: 2px solid var(--action, #0b0b0b); outline-offset: 1px; } .ds-src { color: var(--muted, #6b6a65); font-size: 11px; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Pill with a status dot; the text stays ink.",
+      "html": "<span class=\"ds-chip\"><i style=\"background:#0ca30c\"></i>Approved</span> <span class=\"ds-chip\"><i style=\"background:#ec835a\"></i>Max rounds</span> <span class=\"ds-chip\"><i style=\"background:#d03b3b\"></i>Failed</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 5px; font: 12px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--ink, #0b0b0b); padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border, rgba(11,11,11,0.10)); white-space: nowrap; } .ds-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }"
+    },
+    {
+      "name": "Stat Tile",
+      "kind": "card",
+      "refersTo": "tile",
+      "description": "Flat metric tile: label, large value, sub-line.",
+      "html": "<div class=\"ds-tile\"><div class=\"ds-label\">Loops</div><div class=\"ds-value\">12</div><div class=\"ds-sub\">9 approved</div></div>",
+      "css": ".ds-tile { font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; background: var(--surface, #fcfcfb); border: 1px solid var(--border, rgba(11,11,11,0.10)); border-radius: 10px; padding: 12px 14px; max-width: 200px; color: var(--ink, #0b0b0b); } .ds-label { color: var(--muted, #6b6a65); font-size: 12px; } .ds-value { font-size: 26px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; } .ds-sub { color: var(--ink-2, #52514e); font-size: 12px; }"
+    },
+    {
+      "name": "Round Pair",
+      "kind": "custom",
+      "refersTo": "doc-pane",
+      "description": "Signature: coder and reviewer documents side by side, with comment ID badges.",
+      "html": "<div class=\"ds-pair\"><div class=\"ds-doc\"><div class=\"ds-who\">Coder</div><p><span class=\"ds-cid\">R1-C1</span> resolved: added ValueError on zero.</p></div><div class=\"ds-doc\"><div class=\"ds-who\">Reviewer</div><p><span class=\"ds-cid\">R1-C1</span> blocking: no</p><p><b>VERDICT: approved</b></p></div></div>",
+      "css": ".ds-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; font: 12px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--ink, #0b0b0b); } .ds-doc { background: var(--page, #f9f9f7); border: 1px solid var(--border, rgba(11,11,11,0.10)); border-radius: 8px; padding: 10px 14px; } .ds-who { font-size: 11px; color: var(--muted, #6b6a65); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; } .ds-doc p { margin: 6px 0; } .ds-cid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface, #fcfcfb); padding: 0 6px; border-radius: 4px; border: 1px solid var(--border, rgba(11,11,11,0.10)); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Two-Voice Console",
+    "overview": "The dashboard records a conversation between two agents. Everything is built around those two voices: the coder speaks in blue, the reviewer in orange, and both appear on quiet stone-grey paper that adds nothing of its own. Charts, legends, round timelines and side-by-side document panes all keep the same voice-to-colour mapping, so a reader can follow who said what without reading a label.\n\nThe console is quiet and utilitarian. Surfaces are flat, separated by hairline borders rather than shadows. Type is the system font at small, dense sizes. Apart from the two voices, colour appears only as state: a status dot on a chip, a red error, a green success. The page is one self-contained file with no web fonts, images or icon sets. Its character comes from restraint and consistency, not ornament.\n\nLight and dark themes are first-class. Dark mode is not an inversion: it is a separately tuned set of near-black stone surfaces in which both voices are re-tuned (a brighter blue, a deeper orange) to keep their contrast and balance.",
+    "keyCharacteristics": [
+      "Two voice colours (coder blue, reviewer orange) on warm neutral stone.",
+      "Flat surfaces, 1px translucent hairlines, no resting shadows.",
+      "System font only, 11–26px, with tabular numerals for data.",
+      "Colour as state: dot-chips carry status, the text stays ink.",
+      "Dense, scannable, desktop-first, collapsing gracefully at 640px."
+    ],
+    "rules": [
+      {
+        "name": "The Voice Ownership Rule",
+        "body": "Blue means the coder and orange means the reviewer, and nothing else. Actions use the ink `--action` token; data that belongs to neither agent (such as rounds per loop) is drawn in Muted.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dot, Not the Fill Rule",
+        "body": "Status colour is carried by a small dot or a short run of text, never by a filled background. Chip text stays ink.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Numbers Rule",
+        "body": "Every numeric column and chart tick uses `font-variant-numeric: tabular-nums` and is right-aligned in tables.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Web Fonts Rule",
+        "body": "The file is self-contained and must work from `file://`. Never load a font; use system stacks only.",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline, Not Shadow Rule",
+        "body": "Separate surfaces with a 1px translucent border and a change in tone. Do not add shadows to cards, tiles or controls.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep blue for the coder and orange for the reviewer in every chart, legend and paired view.",
+      "Do define every colour as a token on `:root`, with dark values under `prefers-color-scheme: dark` (guarded by `:not([data-theme=\"light\"])`) and again under `[data-theme=\"dark\"]`.",
+      "Do separate surfaces with 1px hairlines and a change in tone.",
+      "Do carry status as a dot in a pill chip, with the text left in ink.",
+      "Do set file-sourced strings (IDs, paths, commands) in the monospace stack.",
+      "Do use tabular numerals for every number.",
+      "Do use the ink `--action` token for links, current navigation, primary buttons and focus."
+    ],
+    "donts": [
+      "Don't use coder blue or reviewer orange for actions, statuses or data that belongs to neither agent.",
+      "Don't load web fonts, icon fonts, images or any external resource.",
+      "Don't add shadows to cards, tiles or controls; the tooltip is the only lifted element.",
+      "Don't fill large areas with status colours.",
+      "Don't introduce new saturated hues beyond the two voices and four statuses."
+    ]
+  }
+}
