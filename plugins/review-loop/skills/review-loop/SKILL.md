@@ -1,7 +1,7 @@
 ---
 name: review-loop
 description: Start a coder/reviewer loop for a task. Claude implements the task, an independent CLI reviewer (Codex, Claude, ...) reviews it, and the loop repeats until the reviewer approves. Every round's summary and review comments are stored in the project.
-argument-hint: "<task description> [--backend codex|claude] [--model MODEL] [--max-rounds N] [--dir DIR] [--usage] [--reviewer-extra FILE] [--coder-extra FILE] [--force] [--git-exclude]"
+argument-hint: "<task description> [--backend codex|claude] [--model MODEL] [--max-rounds N] [--dir DIR] [--usage] [--reviewer-extra FILE] [--coder-extra FILE] [--reviewer-roles LIST] [--coder-roles LIST] [--force] [--git-exclude]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(bash ${CLAUDE_SKILL_DIR}/scripts/*)
@@ -29,15 +29,16 @@ bash ${CLAUDE_SKILL_DIR}/scripts/start.sh --session ${CLAUDE_SESSION_ID} $ARGUME
 ```
 
 (The user's arguments may include `--backend`, `--model`, `--effort`,
-`--max-rounds`, `--usage` and the prompt flags; `config.sh models` lists the
+`--max-rounds`, `--usage`, the prompt flags and the role preset flags
+`--reviewer-roles` / `--coder-roles`, whose names `config.sh roles` lists; `config.sh models` lists the
 models and efforts a backend offers. `--session` identifies your session as the loop owner and, when the user
 enables `--usage`, lets the loop record your token usage; keep it as is.)
 
 It prints the loop id, the loop directory, the task file and **your brief**
 (also saved as `<loop dir>/coder-brief.md`). The brief is the protocol below
 plus any project-specific instructions the user configured for the coder
-role (`prompts.coder_extra`, or a replacement brief via `prompts.coder`);
-follow it. If start.sh reports that a loop is already active, tell the user
+role (role presets via `roles.coder`, `prompts.coder_extra`, or a replacement
+brief via `prompts.coder`); follow it. If start.sh reports that a loop is already active, tell the user
 and stop; they can run `/review-cancel` or pass `--force`.
 
 ## 2. Implement the task

@@ -139,11 +139,15 @@
   .cfg-out.ok { color: var(--good-text); } .cfg-out.err { color: var(--critical-text); }
   .cfg-group { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 4px; }
   .cfg-grid.one { grid-template-columns: 1fr; margin: 6px 0 0; }
-  .role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin: 8px 0; }
-  .role-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; margin: 8px 0; }
+  .role-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0; overflow-wrap: anywhere; }
   .role-card h4 { margin: 0; font-size: 14px; }
   .role-status { font-size: 12px; color: var(--ink-2); margin: 4px 0 0; }
   .role-status .missing { color: var(--critical-text); font-weight: 600; }
+  fieldset.role-picks { border: 0; padding: 0; margin: 6px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 2px 12px; font-size: 13px; }
+  fieldset.role-picks legend { font-size: 12px; color: var(--muted); padding: 0; margin-bottom: 2px; }
+  fieldset.role-picks label { display: flex; align-items: baseline; gap: 6px; min-height: 24px; }
+  fieldset.role-picks .src { white-space: nowrap; }
   details.role-tpl { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
   details.role-tpl pre { max-height: 240px; overflow: auto; font-size: 11px; background: var(--page); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; margin: 6px 0 0; }
   .start-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 10px 14px; margin: 8px 0; }
@@ -382,7 +386,8 @@ var RL = (function () {
   // catalog: the chosen backend's model catalog ({models, efforts}) when known,
   // model: the chosen model; efforts are a closed list per model (or backend),
   // models only a suggestion.
-  function validateValue(k, raw, backends, catalog, model) {
+  // presets: the role preset names the roles.* keys accept (unchecked when unknown).
+  function validateValue(k, raw, backends, catalog, model, presets) {
     raw = String(raw == null ? '' : raw);
     switch (k.type) {
       case 'integer':
@@ -390,7 +395,11 @@ var RL = (function () {
         // Same bound as config.sh (2^53 - 1): larger values cannot be stored exactly.
         return (raw.length < 16 || (raw.length === 16 && raw <= '9007199254740991')) ? '' : `${k.key} is too large (max 9007199254740991)`;
       case 'boolean': return /^(1|true|yes|y|on|0|false|no|n|off)$/i.test(raw) ? '' : `${k.key} must be true or false`;
-      case 'list': return '';
+      case 'list': {
+        if (!k.key.startsWith('roles.') || !Array.isArray(presets) || !presets.length) return '';
+        const bad = raw.split(',').map(x => x.trim()).filter(x => x && !presets.includes(x));
+        return bad.length ? `unknown role preset${bad.length > 1 ? 's' : ''} ${bad.join(', ')}` : '';
+      }
       default:
         if (k.key === 'backend') return (backends || []).includes(raw) ? '' : `unknown backend '${raw}'`;
         if (k.key === 'dir' && raw === '') return 'dir cannot be empty';
@@ -548,16 +557,17 @@ var RL = (function () {
     return { view: 'home' };
   }
   // The agent roles: each runs with a prompt template (the default, or the file
-  // configured as its replacement) plus an optional extra file appended to it.
+  // configured as its replacement), the role presets it focuses on, and an
+  // optional extra file appended to it.
   const ROLES = [
-    { role: 'reviewer', title: 'Reviewer', what: 'reviews the diff each round', template: 'prompts.reviewer', extra: 'prompts.reviewer_extra', defaultName: 'reviewer-prompt.md' },
-    { role: 'coder', title: 'Coder', what: 'gets the brief when the loop starts and at each round', template: 'prompts.coder', extra: 'prompts.coder_extra', defaultName: 'coder-brief.md' }
+    { role: 'reviewer', title: 'Reviewer', what: 'reviews the diff each round', template: 'prompts.reviewer', extra: 'prompts.reviewer_extra', presets: 'roles.reviewer', defaultName: 'reviewer-prompt.md' },
+    { role: 'coder', title: 'Coder', what: 'gets the brief when the loop starts and at each round', template: 'prompts.coder', extra: 'prompts.coder_extra', presets: 'roles.coder', defaultName: 'coder-brief.md' }
   ];
   // Configuration keys in the groups the page shows: the loop, the dashboard,
   // and the agent roles (rendered as one card per role).
   function groupKeys(keys) {
     const g = { loop: [], dashboard: [], roles: [] };
-    for (const k of keys || []) g[k.key.startsWith('prompts.') ? 'roles' : k.key.startsWith('dashboard.') ? 'dashboard' : 'loop'].push(k);
+    for (const k of keys || []) g[/^(prompts|roles)\./.test(k.key) ? 'roles' : k.key.startsWith('dashboard.') ? 'dashboard' : 'loop'].push(k);
     return [{ id: 'loop', title: 'Loop', keys: g.loop }, { id: 'dashboard', title: 'Dashboard', keys: g.dashboard }, { id: 'roles', title: 'Agent roles', keys: g.roles }].filter(x => x.keys.length);
   }
   // What a role runs with, from the effective configuration and the file facts
@@ -572,7 +582,9 @@ var RL = (function () {
       return { kind, hidden: false, configured: true, value: String(value), path: f.path || null,
         exists: f.exists == null ? null : !!f.exists, readable: f.readable == null ? null : !!f.readable };
     };
-    return { role: def.role, template: one(def.template, 'template'), extra: one(def.extra, 'extra') };
+    const names = getPath(effective, def.presets);
+    const presets = names == null ? { hidden: true, names: [] } : { hidden: false, names: Array.isArray(names) ? names.map(String) : [] };
+    return { role: def.role, template: one(def.template, 'template'), extra: one(def.extra, 'extra'), presets };
   }
   // The {{PLACEHOLDERS}} a template uses, in order of first appearance.
   const placeholders = text => [...new Set((text || '').match(/\{\{[A-Z_]+\}\}/g) || [])];
@@ -582,6 +594,18 @@ var RL = (function () {
     if (!prompts || typeof prompts !== 'object') return null;
     const tpl = prompts[role] || '', extra = prompts[role + '_extra'] || '';
     return (tpl || 'default') + (extra ? ' + ' + extra : '');
+  }
+  // A loop's role presets (state.roles, frozen at start): "none", the names,
+  // or null for loops recorded before roles were stored.
+  function rolesLabel(roles, role) {
+    if (!roles || typeof roles !== 'object') return null;
+    const names = Array.isArray(roles[role]) ? roles[role] : [];
+    return names.length ? names.join(', ') : 'none';
+  }
+  // Toggle one preset name in a comma-separated list, keeping the order.
+  function togglePreset(raw, name, on) {
+    const names = String(raw || '').split(',').map(x => x.trim()).filter(Boolean).filter(x => x !== name);
+    return (on ? [...names, name] : names).join(',');
   }
   // The link to one loop's page; parseRoute reads it back.
   const loopHref = id => '#/loop/' + encodeURIComponent(id);
@@ -602,7 +626,7 @@ var RL = (function () {
   }
 
   return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute,
-    ROLES, groupKeys, roleStatus, placeholders, promptLabel, effortChoices, catalogChoices, catalogSelection, readCatalog, shq, startPayload, startCommand, activeLoopFor,
+    ROLES, groupKeys, roleStatus, placeholders, promptLabel, rolesLabel, togglePreset, effortChoices, catalogChoices, catalogSelection, readCatalog, shq, startPayload, startCommand, activeLoopFor,
     loopHref, chartTable, readJson };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
@@ -961,14 +985,22 @@ if (typeof module !== 'undefined') module.exports = RL;
       const fileNote = x => x.exists === false ? ' <span class="missing">— file missing: the loop will not start</span>' : x.exists && x.readable === false ? ' <span class="missing">— file unreadable</span>' : '';
       const tpl = st.template.hidden ? 'template: <i>value hidden</i>' : st.template.configured ? `template: replaced by <b class="mono">${esc(st.template.value)}</b>${fileNote(st.template)}` : `template: default <span class="mono">${esc(def.defaultName)}</span>`;
       const extra = st.extra.hidden ? 'extra instructions: <i>value hidden</i>' : st.extra.configured ? `extra instructions: <b class="mono">${esc(st.extra.value)}</b>${fileNote(st.extra)}` : 'extra instructions: none';
+      const presets = st.presets.hidden ? 'role presets: <i>value hidden</i>' : st.presets.names.length ? `role presets: <b class="mono">${esc(st.presets.names.join(', '))}</b>` : 'role presets: none';
       const text = (DATA.templates || {})[def.role] || '';
       const ph = RL.placeholders(text);
-      return `<div class="role-card" data-role="${def.role}"><h4>${esc(def.title)}</h4><div class="role-status">${esc(def.what)} · ${tpl} · ${extra}</div>
-        <div class="cfg-grid one">${(CFG.keys || []).filter(k => k.key === def.template || k.key === def.extra).map(rowHtml).join('')}</div>
+      // The presets key gets a checkbox per preset under its text field; both
+      // edit the same comma-separated value.
+      const picked = String(sc.form[def.presets] ?? '').split(',').map(x => x.trim());
+      const defaults = RL.getPath(CFG.show.defaults || {}, def.presets) || [];
+      const picks = (CFG.roles || []).length && (CFG.keys || []).some(k => k.key === def.presets)
+        ? `<fieldset class="role-picks"><legend>role presets for the ${esc(def.role)}</legend>${(CFG.roles || []).map(p => `<label title="${esc(p.summary)}"><input type="checkbox" data-pick="${def.presets}" value="${esc(p.name)}" ${picked.includes(p.name) ? 'checked' : ''} ${sc.remove.has(def.presets) ? 'disabled' : ''}> <span>${esc(p.title)} <span class="src mono">${esc(p.name)}</span>${defaults.includes(p.name) ? ' <span class="src">· default</span>' : ''}</span></label>`).join('')}</fieldset>`
+        : '';
+      return `<div class="role-card" data-role="${def.role}"><h4>${esc(def.title)}</h4><div class="role-status">${esc(def.what)} · ${tpl} · ${presets} · ${extra}</div>
+        <div class="cfg-grid one">${(CFG.keys || []).filter(k => k.key === def.template || k.key === def.presets || k.key === def.extra).map(rowHtml).join('')}</div>${picks}
         ${text ? `<details class="role-tpl"><summary>default template <span class="mono">${esc(def.defaultName)}</span> · placeholders: ${ph.map(x => `<span class="mono">${esc(x)}</span>`).join(', ') || 'none'}</summary><pre>${esc(text)}</pre></details>` : ''}</div>`;
     };
     // Any prompts.* key no role card covers still gets an ordinary row.
-    const roleKeys = new Set(RL.ROLES.flatMap(d => [d.template, d.extra]));
+    const roleKeys = new Set(RL.ROLES.flatMap(d => [d.template, d.extra, d.presets]));
     keepFocus($('#cfg-grid'), () => { $('#cfg-grid').innerHTML = RL.groupKeys(CFG.keys || []).map(g => `<h3 class="cfg-group">${esc(g.title)}</h3>`
       + (g.id === 'roles'
         ? `<div class="role-cards">${RL.ROLES.map(roleCard).join('')}</div><div class="cfg-grid">${g.keys.filter(k => !roleKeys.has(k.key)).map(rowHtml).join('')}</div>`
@@ -980,6 +1012,10 @@ if (typeof module !== 'undefined') module.exports = RL;
         if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off';
         const fb = $(`[data-force="${key}"]`);
         if (fb) fb.style.display = sc.form[key] === sc.initial[key] ? '' : 'none';
+        if (key.startsWith('roles.')) {
+          const on = sc.form[key].split(',').map(x => x.trim());
+          $('#cfg-grid').querySelectorAll(`[data-pick="${key}"]`).forEach(c => { c.checked = on.includes(c.value); });
+        }
         if (['backend', 'model'].includes(key)) {
           Object.assign(sc.form, RL.catalogSelection((CFG.models || {})[sc.form.backend] || {}, sc.form.model, sc.form.effort, key === 'backend'));
           cfgRenderRows();
@@ -989,6 +1025,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       el.onchange = h;
       if (el.tagName !== 'SELECT') el.oninput = h;
     });
+    $('#cfg-grid').querySelectorAll('[data-pick]').forEach(c => c.onchange = () => cfgPickPreset(c.dataset.pick, c.value, c.checked));
     if ($('#cfg-model-refresh')) bindCatalogActions('cfg-model', sc.form.backend);
     $('#cfg-grid').querySelectorAll('[data-unset]').forEach(b => b.onclick = () => { const k = b.dataset.unset; if (sc.remove.has(k)) sc.remove.delete(k); else { sc.remove.add(k); sc.force.delete(k); } cfgRenderRows(); cfgUpdate(); });
     $('#cfg-grid').querySelectorAll('[data-force]').forEach(b => b.onclick = () => { const k = b.dataset.force; if (sc.force.has(k)) sc.force.delete(k); else sc.force.add(k); b.textContent = sc.force.has(k) ? 'writing' : 'write'; cfgUpdate(); });
@@ -998,10 +1035,21 @@ if (typeof module !== 'undefined') module.exports = RL;
     }
   }
   function cfgChanges() { return RL.diffConfig(CFG.keys || [], CFG.show.effective || {}, cfgState.form, { force: [...cfgState.force], remove: [...cfgState.remove] }); }
+  // A role preset checkbox: toggle the name in its key's value, keep the text
+  // field in step, and save it like any other edit (cfgUpdate schedules the
+  // auto-save). Unchecking every box stores an empty list, which turns the
+  // role's default presets off; "unset" brings them back.
+  function cfgPickPreset(key, name, on) {
+    const sc = cfgState;
+    sc.form[key] = RL.togglePreset(sc.form[key] ?? '', name, on);
+    const input = $(`[data-key="${key}"]`); if (input) input.value = sc.form[key];
+    const fb = $(`[data-force="${key}"]`); if (fb && fb.style) fb.style.display = sc.form[key] === sc.initial[key] ? '' : 'none';
+    cfgUpdate();
+  }
   function cfgErrors(ch) {
     const errs = {};
     const cat = (CFG.models || {})[cfgState.form.backend] || null;
-    for (const k of CFG.keys || []) if (k.key in ch.set) { const e = RL.validateValue(k, ch.set[k.key], CFG.backends, cat, cfgState.form.model); if (e) errs[k.key] = e; }
+    for (const k of CFG.keys || []) if (k.key in ch.set) { const e = RL.validateValue(k, ch.set[k.key], CFG.backends, cat, cfgState.form.model, (CFG.roles || []).map(p => p.name)); if (e) errs[k.key] = e; }
     return errs;
   }
   function cfgUpdate(suppressAutosave = false) {
@@ -1253,7 +1301,8 @@ if (typeof module !== 'undefined') module.exports = RL;
         ${l.st.finished_at ? `<span>finished <b>${esc(fmtDate(l.st.finished_at))}</b></span>` : ''}<span>duration <b>${fmtDur(l.duration)}</b></span>
         <span>coder time <b>${fmtCoderTime(l, true)}</b></span><span>review time <b>${fmtDur(l.reviewTime)}</b></span>
         ${l.usage ? `<span>cost <b>${fmtCost(l.cost)}</b></span>` : ''}<span>dir <b class="mono">${esc(l.dir)}</b></span>
-        ${l.st.prompts ? `<span>reviewer prompt <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'reviewer'))}</b></span><span>coder brief <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'coder'))}</b></span>` : ''}</div>
+        ${l.st.prompts ? `<span>reviewer prompt <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'reviewer'))}</b></span><span>coder brief <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'coder'))}</b></span>` : ''}
+        ${l.st.roles ? `<span>reviewer roles <b class="mono">${esc(RL.rolesLabel(l.st.roles, 'reviewer'))}</b></span><span>coder roles <b class="mono">${esc(RL.rolesLabel(l.st.roles, 'coder'))}</b></span>` : ''}</div>
       ${roundsHtml || '<div class="empty">No rounds yet.</div>'}
       ${l.summary ? `<div class="round"><h3>Summary</h3><div class="doc" role="region" aria-label="Loop summary"><div class="md">${md(l.summary)}</div></div></div>` : ''}
     </div>`;

@@ -113,9 +113,10 @@ done < <(sort -t "$(printf '\t')" -k1,1 -u -s "$CANDIDATES")
 
 # Configuration, as config.sh reports it, so the page can show and edit it; the
 # default role templates are embedded too, so the agent-roles section can show
-# what each role runs with and which {{placeholders}} a replacement may use.
+# what each role runs with and which {{placeholders}} a replacement may use, and
+# the keys list carries the role presets the roles.* keys can pick from.
 (cd "$ROOT" && bash "$RL_SCRIPTS_DIR/config.sh" show --json) > "$WORK/config-show.json" 2>/dev/null || echo 'null' > "$WORK/config-show.json"
-bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/null || echo '{"keys":[],"backends":[]}' > "$WORK/config-keys.json"
+bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/null || echo '{"keys":[],"backends":[],"roles":[]}' > "$WORK/config-keys.json"
 # Each backend's model catalog, so the page can offer models and efforts.
 echo '{}' > "$WORK/models.json"
 while IFS= read -r b; do
@@ -160,7 +161,7 @@ jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" --arg script "$RL_SCRIPTS_DIR/co
   --arg home "$HOME" --arg ucfg "$(rl_user_config_dir)/config.json" \
   --rawfile rtpl "$RL_TEMPLATES_DIR/reviewer-prompt.md" --rawfile ctpl "$RL_TEMPLATES_DIR/coder-brief.md" \
   '{generated_at: $t, root: $root, loops: (sort_by([.state.started_at, .state.loop_id]) | reverse),
-    config: {show: $show[0], keys: $keys[0].keys, backends: $keys[0].backends, script: $script,
+    config: {show: $show[0], keys: $keys[0].keys, backends: $keys[0].backends, roles: ($keys[0].roles // []), script: $script,
              provider_files: $pf[0], home: $home, user_shared: $ucfg, models: $models[0]},
     templates: {reviewer: $rtpl, coder: $ctpl},
     serve: (if $token == "" then null else {token: $token} end)}' \

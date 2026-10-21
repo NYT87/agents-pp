@@ -76,6 +76,34 @@ function setup(served) {
   assert.equal(timers.size, 0, 'invalid values are not auto-saved');
   assert.equal($('#cfg-apply').disabled, true);
 
+  // Role preset checkboxes save on change like any other edit; unchecking
+  // every box writes an empty list (defaults off), never an unset.
+  const roles = setup(true), rc = roles.ctx;
+  rc.CFG.keys = [{ key: 'roles.coder', type: 'list' }];
+  rc.CFG.roles = [{ name: 'senior-qa' }, { name: 'tdd-guide' }];
+  rc.CFG.show.effective = { roles: { coder: ['senior-qa'] } };
+  rc.cfgState.form = { 'roles.coder': 'senior-qa' }; rc.cfgState.initial = { 'roles.coder': 'senior-qa' };
+  const roleBodies = [];
+  rc.fetch = async (url, options) => {
+    const body = JSON.parse(options.body); roleBodies.push(body);
+    const coder = String(body.set['roles.coder']).split(',').filter(Boolean);
+    return { ok: true, json: async () => ({ ok: true, output: '', show: { effective: { roles: { coder } }, files: [] }, launch_effective: {} }) };
+  };
+  rc.cfgPickPreset('roles.coder', 'tdd-guide', true);
+  assert.equal(roles.$('[data-key="roles.coder"]').value, 'senior-qa,tdd-guide', 'the text field follows the checkbox');
+  assert.equal(roles.timers.size, 1, 'a checkbox change schedules an auto-save');
+  await roles.runTimer();
+  assert.equal(roleBodies[0].set['roles.coder'], 'senior-qa,tdd-guide');
+  assert.match(roles.$('#cfg-out').textContent, /Saved automatically/);
+  rc.cfgPickPreset('roles.coder', 'senior-qa', false); rc.cfgPickPreset('roles.coder', 'tdd-guide', false);
+  assert.equal(roles.timers.size, 1, 'quick clicks debounce into one save');
+  await roles.runTimer();
+  assert.equal(roleBodies.length, 2);
+  assert.equal(roleBodies[1].set['roles.coder'], '', 'unchecking all stores an empty list');
+  assert.deepEqual(roleBodies[1].unset, []);
+  rc.cfgPickPreset('roles.coder', 'bogus', true);
+  assert.equal(roles.timers.size, 0, 'an unknown preset is not auto-saved');
+
   const local = setup(false);
   let fileText = '{"untouched":9007199254740999,"model":""}', writes = 0;
   local.ctx.handle = {

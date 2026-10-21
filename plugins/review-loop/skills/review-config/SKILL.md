@@ -1,6 +1,6 @@
 ---
 name: review-config
-description: Create or update the review-loop configuration file by answering a few questions (backend, model, rounds, storage dir, usage tracking, dashboard), showing the current values, and optionally adding the loop's paths to .gitignore.
+description: Create or update the review-loop configuration file by answering a few questions (backend, model, rounds, storage dir, usage tracking, dashboard, role presets), showing the current values, and optionally adding the loop's paths to .gitignore.
 argument-hint: "[--user|--project] [--provider [NAME] | --provider-file [NAME]]"
 disable-model-invocation: true
 allowed-tools:
@@ -59,6 +59,19 @@ effective value in each question** and offering it as the first option:
 | `dashboard.open` | open the dashboard in the browser after `/review-dashboard` | yes / no |
 | `dashboard.auto` | regenerate the dashboard automatically when a loop ends | yes / no |
 | `dashboard.out` | dashboard output file | keep current / default (`<dir>/dashboard.html`) / a path |
+
+| `roles.reviewer` | role presets that focus the reviewer | keep current / default (`code-reviewer`, `senior-security`) / none / pick any of the presets (see below) |
+| `roles.coder` | role presets that focus the coder | keep current / default (`senior-qa`) / none / pick any of the presets |
+
+For the two `roles.*` keys, list the presets and let the user pick several
+(multi-select, by title, with the summary as the description); write the
+chosen names comma-separated, e.g. `roles.reviewer=code-reviewer,senior-security`,
+an empty value (`roles.coder=`) for none, and `unset` the key to go back to the
+default (`defaults.roles` in the `show --json` output):
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh roles --json
+```
 
 Skip `dashboard.dirs` unless the user mentions several storage folders; then
 ask for a comma-separated list.

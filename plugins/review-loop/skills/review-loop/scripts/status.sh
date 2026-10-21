@@ -20,6 +20,7 @@ echo "  round:       $ROUND / $(rl_state_get "$RL_LOOP_DIR" max_rounds)$(jq -r '
 echo "  backend:     $(rl_state_get "$RL_LOOP_DIR" backend) (model: $(rl_state_get "$RL_LOOP_DIR" model | sed 's/^$/default/'), effort: $(rl_state_get "$RL_LOOP_DIR" effort | sed 's/^$/default/'))"
 echo "  usage:       $(rl_usage_enabled "$RL_LOOP_DIR" && echo on || echo off)"
 echo "  prompts:     $(jq -r '.prompts // {} | "reviewer \(.reviewer // "" | if . == "" then "default" else . end) (+ \(.reviewer_extra // "" | if . == "" then "no extra" else . end)), coder \(.coder // "" | if . == "" then "default" else . end) (+ \(.coder_extra // "" | if . == "" then "no extra" else . end))"' "$RL_LOOP_DIR/state.json")"
+echo "  roles:       $(jq -r '.roles // {} | "reviewer \(.reviewer // [] | if length == 0 then "none" else join(",") end), coder \(.coder // [] | if length == 0 then "none" else join(",") end)"' "$RL_LOOP_DIR/state.json")"
 echo "  last verdict: $(rl_state_get "$RL_LOOP_DIR" verdict | sed 's/^$/none/')"
 echo "  started:     $(rl_state_get "$RL_LOOP_DIR" started_at)"
 echo "  retries:     $(rl_state_get "$RL_LOOP_DIR" retries)"

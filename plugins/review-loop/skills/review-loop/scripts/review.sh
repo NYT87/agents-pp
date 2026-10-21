@@ -209,7 +209,8 @@ fi
 
 P_REVIEWER=$(jq -r '.prompts.reviewer // ""' "$RL_LOOP_DIR/state.json")
 P_REVIEWER_EXTRA=$(jq -r '.prompts.reviewer_extra // ""' "$RL_LOOP_DIR/state.json")
-PROMPT=$(rl_role_prompt "$RL_ROOT" reviewer "$RL_TEMPLATES_DIR/reviewer-prompt.md" "$P_REVIEWER" "$P_REVIEWER_EXTRA")
+P_REVIEWER_ROLES=$(jq -c '.roles.reviewer // []' "$RL_LOOP_DIR/state.json")
+PROMPT=$(rl_role_prompt "$RL_ROOT" reviewer "$RL_TEMPLATES_DIR/reviewer-prompt.md" "$P_REVIEWER" "$P_REVIEWER_EXTRA" "$P_REVIEWER_ROLES")
 PROMPT=${PROMPT//'{{ROUND}}'/$ROUND}
 PROMPT=${PROMPT//'{{MAX_ROUNDS}}'/$MAX_ROUNDS}
 PROMPT=${PROMPT//'{{TASK}}'/$TASK}

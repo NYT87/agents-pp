@@ -132,6 +132,44 @@ bash $CFG set prompts.reviewer_extra=docs/review-guidelines.md prompts.coder_ext
 
 A replacement reviewer template must still end with the required output format (`{{REVIEW_FORMAT}}`) so verdicts stay machine-parseable; if a replacement template has no `{{EXTRA}}`, configured extras are appended at the end anyway. Paths are frozen into `state.json` when the loop starts and the files are read at each use, so edits apply to the next round: the reviewer prompt is built each round, and `coder-brief.md` is re-rendered whenever `review.sh` advances to a new round (its output tells the coder to re-read it). A missing or unreadable file stops `start.sh` (before it creates or cancels anything) or `review.sh` with a message naming the key. For the reviewer's files that happens before the reviewer runs; the coder's files are only needed when a new round starts, so a missing one never blocks an approval or the final round: `review.sh` keeps the review on disk and leaves the round where it is; the coder fixes the file and runs it again, and that run resumes from the installed review (verdict and comments unchanged) without calling the reviewer a second time.
 
+### Role presets: focus an agent on a speciality
+
+`templates/roles/` ships ready-made role presets, short focus instructions
+adapted (MIT) from the Core Engineering and Development Tools skills of
+[alirezarezvani/claude-skills](https://github.com/alirezarezvani/claude-skills/tree/main/engineering-team):
+
+| Group | Presets |
+|---|---|
+| Core Engineering | `senior-architect`, `senior-frontend`, `senior-backend`, `senior-fullstack`, `senior-qa`, `senior-devops`, `senior-secops`, `code-reviewer`, `senior-security` |
+| Development Tools | `tdd-guide`, `tech-stack-evaluator` |
+
+Each one works for either agent: the coder builds to the standards and the
+reviewer checks them. Pick any number per role with `roles.reviewer` and
+`roles.coder` (comma-separated names), or per run with `--reviewer-roles` /
+`--coder-roles` (an empty value means none, even when the config sets some).
+
+The defaults are stack-neutral so they fit any project: the reviewer runs with
+`code-reviewer` and `senior-security` (a general review checklist plus a quick
+threat model of the change) and the coder with `senior-qa` (meaningful,
+reliable tests on the risky paths). Set a key to an empty list
+(`roles.coder=`) to turn its defaults off, or `unset` it to get them back.
+
+```bash
+bash $CFG roles                                   # list the presets
+bash $CFG set roles.reviewer=code-reviewer,senior-security roles.coder=senior-backend,tdd-guide
+/review-loop add the export endpoint --reviewer-roles senior-secops   # per run
+```
+
+Each preset is rendered into `{{EXTRA}}` as a "Role focus: <title>" section,
+before any `prompts.*_extra` file, so it also reaches a replacement template
+(appended when the template has no `{{EXTRA}}`). The names are validated by
+`config.sh` and `start.sh` and frozen into `state.json` (`roles`) when the loop
+starts; the dashboard's configuration page offers them as checkboxes on each
+role card, saved automatically on every change like the other settings (on a
+`--serve` page right away; on a static page once auto-save is enabled for the
+config file). To add your own preset, drop a `<name>.md` file with `title`,
+`summary`, `group` and `source` front matter into `templates/roles/`.
+
 ### Verdict rules
 
 New loops freeze `protocol_version: 2` in state. They validate unique consecutive
@@ -276,6 +314,7 @@ With `dir` set to the project root (`.`), `gitignore` writes a pattern matching 
 | Storage dir | `--dir` | `REVIEW_LOOP_DIR` | `dir` | `.review-loop` |
 | Usage tracking | `--usage` / `--no-usage` | `REVIEW_LOOP_USAGE` | `usage` | `false` |
 | Role prompts | `--reviewer-prompt` / `--reviewer-extra` / `--coder-prompt` / `--coder-extra` | | `prompts.{reviewer,reviewer_extra,coder,coder_extra}` | templates in `templates/` |
+| Role presets | `--reviewer-roles` / `--coder-roles` | | `roles.{reviewer,coder}` | reviewer `code-reviewer,senior-security`, coder `senior-qa` (list: `config.sh roles`) |
 | Dashboard | `--dir` / `--out` / `--open` | `REVIEW_LOOP_DASHBOARD_OPEN`, `REVIEW_LOOP_DASHBOARD_OUT` | `dashboard.{dirs,out,open,auto}` | loop dir, `<dir>/dashboard.html`, `true`, `false` |
 
 Example `~/.config/review-loop/config.json`:

@@ -829,7 +829,7 @@ echo '{}' > "$R/.claude/review-loop.json"
 section "config command"
 C="$S/config.sh"
 R=$(new_repo r24); rm -f "$HOME/.claude/review-loop.json"
-assert_eq "keys lists every key" "14" "$(bash "$C" keys | grep -c .)"
+assert_eq "keys lists every key" "16" "$(bash "$C" keys | grep -c .)"
 OUT=$(cd "$R" && bash "$C" show)
 assert_contains "show: missing project file" "review-loop.json (missing)" "$OUT"
 assert_contains "show: backend row shows env value and default" "codex" "$(printf '%s' "$OUT" | grep '^  backend ' | grep 'fake')"
@@ -963,7 +963,7 @@ assert_contains "gitignore dir=.: idempotent with the pattern" "already covers" 
 (cd "$R" && bash "$C" unset dir dashboard.dirs > /dev/null)
 
 R=$(new_repo r25); rm -f "$HOME/.claude/review-loop.json"
-OUT=$(cd "$R" && printf 'nope\nclaude\n\n\nabc\n4\n\nyes\n\n\nno\n\n\n\n\n\ny\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf 'nope\nclaude\n\n\nabc\n4\n\nyes\n\n\nno\n\n\n\n\n\n\n\ny\n' | bash "$C" init 2>&1)
 F="$R/.review-loop.json"
 assert_contains "init: creating message" "Creating $F" "$OUT"
 assert_contains "init: shows current value as default" "[fake]:" "$OUT"
@@ -979,7 +979,7 @@ assert_contains "init: gitignore offered last" "Add these to .gitignore?" "$OUT"
 assert_contains "init: gitignore written on y" "/.review-loop/" "$(cat "$R/.gitignore")"
 assert_contains "init: gitignore includes default dashboard file" "/.review-loop/dashboard.html" "$(cat "$R/.gitignore")"
 (cd "$R" && bash "$C" set --user model=opus > /dev/null)
-OUT=$(cd "$R" && printf '\n\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n9\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: updating message" "Updating $F" "$OUT"
 assert_contains "init: shows inherited value" "[opus]:" "$OUT"
 assert_eq "init: Enter keeps inherited value out of the file" "null" "$(jq .model "$F")"
@@ -987,13 +987,13 @@ assert_eq "init: changed value written" "9" "$(jq .max_rounds "$F")"
 assert_eq "init: untouched value kept" "claude" "$(jq -r .backend "$F")"
 assert_contains "init: gitignore already covered" "already covers" "$OUT"
 (cd "$R" && bash "$C" set model=opus dashboard.out=docs/d.html dashboard.dirs=a,b > /dev/null)
-OUT=$(cd "$R" && printf '\n-\n\n\n\n\n-\n-\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n-\n\n\n\n\n-\n-\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: clear hint shown for clearable keys" "(type - to clear)" "$OUT"
 assert_eq "init: - clears model" '""' "$(jq -c .model "$F")"
 assert_eq "init: - clears dashboard.dirs to []" "[]" "$(jq -c .dashboard.dirs "$F")"
 assert_eq "init: - clears dashboard.out" '""' "$(jq -c .dashboard.out "$F")"
 assert_eq "init: cleared model overrides the user file" "" "$(cd "$R" && bash "$C" show --json | jq -r .effective.model)"
-OUT=$(cd "$R" && printf -- '-\n\n-\n\n-\n5\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf -- '-\n\n-\n\n-\n5\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init: - is invalid for backend" "unknown backend '-'" "$OUT"
 assert_contains "init: - is invalid for max_rounds" "positive integer (got '-')" "$OUT"
 assert_eq "init: retry after - works" "5" "$(jq .max_rounds "$F")"
@@ -1151,7 +1151,7 @@ assert_contains "show rejects stray arguments" "unexpected argument 'extra'" "$(
 assert_contains "create rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" create --project stray 2>&1 || true)"
 assert_contains "gitignore rejects stray arguments" "unexpected argument" "$(cd "$R" && bash "$C" gitignore now 2>&1 || true)"
 assert_contains "bad provider name rejected" "invalid provider name" "$(cd "$R" && bash "$C" set --provider='bad name' max_rounds=1 2>&1 || true)"
-OUT=$(cd "$R" && printf '\n\n\n4\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --provider codex 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n4\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --provider codex 2>&1)
 assert_contains "init --provider writes into the section" "Wrote $R/.review-loop.json (providers.codex)" "$OUT"
 assert_eq "init --provider value in section" '4' "$(jq .providers.codex.max_rounds "$R/.review-loop.json")"
 rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json" "$HOME/.codex"
@@ -1175,7 +1175,7 @@ assert_not_contains "unmasked key gets no warning" "warning:" "$OUT"
 OUT=$(cd "$R" && bash "$C" set max_rounds=7 2>&1)
 assert_contains "both files present: default is the shared file" "Updated $R/.review-loop.json" "$OUT"
 assert_contains "both files present: masked write warns" "effective value is 4, set by project claude" "$OUT"
-OUT=$(cd "$R" && printf '\n\n\n8\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n8\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "init warns about masked values too" "warning: max_rounds=8" "$OUT"
 rm -f "$R/.review-loop.json"
 mkdir -p "$HOME/.claude"; echo '{"model": "legacy"}' > "$HOME/.claude/review-loop.json"
@@ -1192,7 +1192,7 @@ rm -f "$HOME/.config/review-loop/config.json" "$HOME/.claude/review-loop.json"
 mkdir -p "$R/.claude"; echo '{"max_rounds": 2, "model": "m"}' > "$R/.claude/review-loop.json"
 OUT=$(cd "$R" && bash "$C" init --project --yes 2>&1)
 assert_not_contains "init --yes writes nothing, so no masking warnings" "warning:" "$OUT"
-OUT=$(cd "$R" && printf '\n\n\n9\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --project 2>&1)
+OUT=$(cd "$R" && printf '\n\n\n9\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init --project 2>&1)
 assert_contains "init warns for the key it wrote" "warning: max_rounds=9" "$OUT"
 assert_eq "init warns only once" "1" "$(printf '%s\n' "$OUT" | grep -c '^warning:')"
 assert_not_contains "init does not warn for keys it did not write" "warning: model=" "$OUT"
@@ -1407,9 +1407,9 @@ fi
 
 section "dashboard configuration panel"
 R=$(new_repo r36); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
-assert_eq "keys --json lists every key" "14" "$(bash "$C" keys --json | jq '.keys | length')"
+assert_eq "keys --json lists every key" "16" "$(bash "$C" keys --json | jq '.keys | length')"
 assert_eq "keys --json excludes the fake backend" '["claude","codex"]' "$(bash "$C" keys --json | jq -c .backends)"
-assert_eq "keys --json marks clearable keys" "8" "$(bash "$C" keys --json | jq '[.keys[] | select(.clearable)] | length')"
+assert_eq "keys --json marks clearable keys" "10" "$(bash "$C" keys --json | jq '[.keys[] | select(.clearable)] | length')"
 (cd "$R" && bash "$C" set max_rounds=3 > /dev/null)
 J=$(cd "$R" && bash "$C" show --json)
 assert_eq "show --json carries sources" '"project shared"' "$(jq .sources.max_rounds <<< "$J")"
@@ -1417,7 +1417,7 @@ assert_eq "show --json source for env" '"env REVIEW_LOOP_BACKEND"' "$(jq .source
 assert_eq "show --json source default" '"default"' "$(jq .sources.model <<< "$J")"
 (cd "$R" && bash "$S/dashboard.sh" > /dev/null)
 D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
-assert_eq "dashboard embeds the config keys" "14" "$(jq '.config.keys | length' <<< "$D")"
+assert_eq "dashboard embeds the config keys" "16" "$(jq '.config.keys | length' <<< "$D")"
 assert_eq "dashboard embeds effective values" "3" "$(jq .config.show.effective.max_rounds <<< "$D")"
 assert_eq "dashboard embeds sources" '"project shared"' "$(jq .config.show.sources.max_rounds <<< "$D")"
 CABS="$(cd "$(dirname "$C")" && pwd)/config.sh"
@@ -1606,6 +1606,14 @@ if command -v python3 > /dev/null 2>&1 && command -v curl > /dev/null 2>&1; then
   assert_eq "serve: edited provider keeps its own effective settings" "codex 7" "$(sed '$d' <<< "$OUT" | jq -r '[.show.provider, (.show.effective.max_rounds | tostring)] | join(" ")')"
   assert_eq "serve: another provider cannot replace launch defaults" "4" "$(sed '$d' <<< "$OUT" | jq .launch_effective.max_rounds)"
   post '{"scope":"project","mode":"section","provider":"codex","unset":["max_rounds"]}' > /dev/null
+  # what a role preset checkbox sends: the full list, then an empty one
+  OUT=$(post '{"scope":"project","mode":"shared","set":{"roles.coder":"senior-qa,tdd-guide"}}')
+  assert_eq "serve: a preset checkbox save is stored" '["senior-qa","tdd-guide"]' "$(jq -c .roles.coder "$R/.review-loop.json")"
+  assert_eq "serve: the save returns the presets for reconciliation" '["senior-qa","tdd-guide"]' "$(sed '$d' <<< "$OUT" | jq -c .show.effective.roles.coder)"
+  post '{"scope":"project","mode":"shared","set":{"roles.coder":""}}' > /dev/null
+  assert_eq "serve: unchecking every preset stores an empty list" '[]' "$(jq -c .roles.coder "$R/.review-loop.json")"
+  assert_contains "serve: an unknown preset is refused" "422" "$(post '{"scope":"project","mode":"shared","set":{"roles.coder":"bogus"}}')"
+  post '{"scope":"project","mode":"shared","unset":["roles.coder"]}' > /dev/null
   OUT=$(post '{"scope":"project","mode":"shared","unset":["usage"]}')
   assert_eq "serve: unset applied" "null" "$(jq .usage "$R/.review-loop.json")"
   assert_contains "serve: validation error surfaces with 422" "positive integer (got '0')" "$(post '{"set":{"max_rounds":"0"}}')"
@@ -1818,22 +1826,22 @@ assert_eq "effort from the config file" "high" "$(st "$L" effort)"
 (cd "$R" && bash "$S/cancel.sh" > /dev/null); (cd "$R" && bash "$C" unset effort > /dev/null)
 # the wizard offers numbered choices for model and effort
 rm -f "$R/.review-loop.json"
-OUT=$(cd "$R" && printf '\n2\n2\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n2\n2\n\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "wizard lists the models" "1) fake-fast — Fake fast (default)" "$OUT"
 assert_contains "wizard lists the chosen model's efforts" "choices for model fake-smart" "$OUT"
 assert_contains "wizard lists the efforts" "3) max" "$OUT"
 assert_eq "wizard: model picked by number" "fake-smart" "$(jq -r .model "$R/.review-loop.json")"
 assert_eq "wizard: effort picked by number" "high" "$(jq -r .effort "$R/.review-loop.json")"
 rm -f "$R/.review-loop.json"
-OUT=$(cd "$R" && printf '\n1\n3\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n1\n3\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "wizard: a model with fewer levels offers only those" "choices for model fake-fast" "$OUT"
 assert_not_contains "wizard: no level the model lacks" "3) max" "$OUT"
 assert_contains "wizard: a level the model lacks is refused by number" "no such choice" "$OUT"
 rm -f "$R/.review-loop.json"
-OUT=$(cd "$R" && printf '\n3\nwhatever\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n3\nwhatever\n\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_not_contains "wizard: a model with unknown levels offers no list" "choices for model fake-mystery" "$OUT"
 assert_eq "wizard: a typed effort is accepted for it" "fake-mystery whatever" "$(jq -r '"\(.model) \(.effort)"' "$R/.review-loop.json")"
-OUT=$(cd "$R" && printf '\n9\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
+OUT=$(cd "$R" && printf '\n9\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nn\n' | bash "$C" init 2>&1)
 assert_contains "wizard: a number out of range is refused" "no such choice" "$OUT"
 rm -f "$R/.review-loop.json"
 # the dashboard embeds every backend's catalog
@@ -2012,7 +2020,7 @@ if command -v node > /dev/null 2>&1; then
     const pr = { reviewer: "", reviewer_extra: "docs/r.md", coder: "docs/c.md", coder_extra: "" };
     console.log(RL.promptLabel(pr, "reviewer") + " | " + RL.promptLabel(pr, "coder") + " | " + RL.promptLabel(null, "coder"));
   ' "$DERIVE" "$(bash "$C" keys --json)")
-  assert_eq "groupKeys: loop, dashboard and roles groups" "loop:6 dashboard:4 roles:4" "$(sed -n 1p <<< "$NOUT")"
+  assert_eq "groupKeys: loop, dashboard and roles groups" "loop:6 dashboard:4 roles:6" "$(sed -n 1p <<< "$NOUT")"
   assert_eq "roleStatus: configured files and their existence" "false true true true false false" "$(sed -n 2p <<< "$NOUT")"
   assert_eq "roleStatus: a hidden value is flagged" "true" "$(sed -n 3p <<< "$NOUT")"
   assert_eq "placeholders: unique, uppercase, in order" "{{TASK}},{{ROUND}}" "$(sed -n 4p <<< "$NOUT")"
@@ -2316,6 +2324,137 @@ start "$R" "plain" > /dev/null; L=$(pointer "$R"); echo w > "$R/i"; coder "$L" 1
 assert_not_contains "no extra section without config" "Additional instructions" "$(cat "$L/round-01-prompt.md")$(cat "$L/coder-brief.md")"
 assert_not_contains "default brief leaves no placeholder" "{{" "$(cat "$L/coder-brief.md")"
 assert_contains "default templates unchanged for the reviewer" "You are an independent, senior code reviewer." "$(cat "$L/round-01-prompt.md")"
+
+section "role presets"
+R=$(new_repo r_roles); rm -rf "$HOME/.config/review-loop" "$HOME/.claude/review-loop.json"
+J=$(bash "$C" roles --json)
+assert_eq "roles: every Core Engineering and Development Tools preset ships" \
+  "code-reviewer senior-architect senior-backend senior-devops senior-frontend senior-fullstack senior-qa senior-secops senior-security tdd-guide tech-stack-evaluator" \
+  "$(jq -r 'map(.name) | join(" ")' <<< "$J")"
+assert_eq "roles: each preset has a title, summary, group and source" "0" \
+  "$(jq '[.[] | select(.title == .name or .summary == "" or (.group | IN("core", "tools") | not) or (.source | startswith("https://github.com/alirezarezvani/claude-skills/") | not))] | length' <<< "$J")"
+assert_contains "roles: text listing names a preset" "senior-backend" "$(bash "$C" roles)"
+# defaults: stack-neutral presets for every role when nothing is configured
+J=$(cd "$R" && bash "$C" show --json)
+assert_eq "default reviewer presets" '["code-reviewer","senior-security"]' "$(jq -c .defaults.roles.reviewer <<< "$J")"
+assert_eq "default coder presets" '["senior-qa"]' "$(jq -c .defaults.roles.coder <<< "$J")"
+assert_eq "defaults are what applies with no config" "default" "$(jq -r '.sources["roles.coder"]' <<< "$J")"
+start "$R" "defaults" > /dev/null; L=$(pointer "$R")
+assert_eq "a loop with no config freezes the default presets" '{"reviewer":["code-reviewer","senior-security"],"coder":["senior-qa"]}' "$(jq -c .roles "$L/state.json")"
+assert_contains "the default coder preset reaches the brief" "## Role focus: Senior QA Engineer (preset senior-qa)" "$(cat "$L/coder-brief.md")"
+echo d > "$R/d"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
+assert_contains "the default reviewer presets reach the prompt" "## Role focus: Senior Security Engineer (preset senior-security)" "$(cat "$L/round-01-prompt.md")"
+# an empty configured list turns the defaults off; unset brings them back
+(cd "$R" && bash "$C" set roles.coder= > /dev/null)
+assert_eq "an empty list is stored to override the default" '[]' "$(jq -c .roles.coder "$R/.review-loop.json")"
+assert_eq "an empty list resolves to none" '[]' "$(cd "$R" && bash "$C" show --json | jq -c .effective.roles.coder)"
+start "$R" "no coder presets" > /dev/null; L=$(pointer "$R")
+assert_not_contains "no coder preset once cleared" "Role focus" "$(cat "$L/coder-brief.md")"
+(cd "$R" && bash "$S/cancel.sh" > /dev/null; bash "$C" unset roles.coder > /dev/null); rm -f "$R/.review-loop.json"
+assert_eq "unset restores the default" '["senior-qa"]' "$(cd "$R" && bash "$C" show --json | jq -c .effective.roles.coder)"
+assert_eq "keys --json carries the presets" "11" "$(bash "$C" keys --json | jq '.roles | length')"
+OUT=$(cd "$R" && bash "$C" set roles.coder=senior-backend,nope 2>&1); RC=$?
+assert_eq "set: an unknown preset fails" "1" "$RC"
+assert_contains "set: the unknown preset is named" "roles.coder: unknown role preset(s): nope (available: code-reviewer" "$OUT"
+assert_no_file "set: nothing written on an unknown preset" "$R/.review-loop.json"
+(cd "$R" && bash "$C" set "roles.coder= senior-backend ,tdd-guide,senior-backend" roles.reviewer=senior-security > /dev/null)
+assert_eq "set: names trimmed, repeats kept once" '["senior-backend","tdd-guide"]' "$(jq -c .roles.coder "$R/.review-loop.json")"
+mkdir -p "$R/docs"; printf 'Coder extra text.\n' > "$R/docs/cx.md"
+OUT=$(start "$R" --coder-extra docs/cx.md --reviewer-roles code-reviewer,senior-security "task"); L=$(pointer "$R")
+assert_contains "start lists the roles" "roles:      reviewer code-reviewer,senior-security, coder senior-backend,tdd-guide" "$OUT"
+assert_eq "roles frozen in state (flag over config)" '{"reviewer":["code-reviewer","senior-security"],"coder":["senior-backend","tdd-guide"]}' "$(jq -c .roles "$L/state.json")"
+B=$(cat "$L/coder-brief.md")
+assert_contains "brief has the preset section" "## Role focus: Senior Backend Engineer (preset senior-backend)" "$B"
+assert_contains "brief has the second preset" "## Role focus: TDD Guide (preset tdd-guide)" "$B"
+assert_contains "brief carries the preset body" "Bring the judgement of a senior backend engineer." "$B"
+assert_not_contains "brief has no preset front matter" "summary:" "$B"
+assert_eq "presets come before the extra file" "1" "$(awk '/Role focus: TDD Guide/ { p = NR } /Additional instructions for the coder/ { e = NR } END { print (p && e && p < e) ? 1 : 0 }' "$L/coder-brief.md")"
+assert_not_contains "brief has no unrendered placeholder" "{{" "$B"
+assert_contains "status shows the roles" "roles:       reviewer code-reviewer,senior-security, coder senior-backend,tdd-guide" "$(cd "$R" && bash "$S/status.sh")"
+echo x > "$R/f"; coder "$L" 1; verdicts changes_requested approved; review "$R" > /dev/null
+P=$(cat "$L/round-01-prompt.md")
+assert_contains "reviewer prompt has its presets" "## Role focus: Code Reviewer (preset code-reviewer)" "$P"
+assert_contains "reviewer prompt has the second preset" "## Role focus: Senior Security Engineer (preset senior-security)" "$P"
+assert_not_contains "reviewer prompt has none of the coder's presets" "preset senior-backend" "$P"
+assert_contains "reviewer prompt keeps the format after the presets" "VERDICT: approved" "$P"
+# the next round's brief re-renders with the frozen presets, even after a config change
+(cd "$R" && bash "$C" unset roles.coder > /dev/null)
+coder "$L" 2; review "$R" > /dev/null
+assert_contains "frozen presets survive a config change" "preset senior-backend" "$(cat "$L/round-02-prompt.md" "$L/coder-brief.md")"
+# --coder-roles "" means none even though the config sets some
+(cd "$R" && bash "$C" set roles.coder=senior-qa > /dev/null)
+start "$R" --coder-roles "" "t2" > /dev/null; L=$(pointer "$R")
+assert_eq "empty --coder-roles clears the configured list" '[]' "$(jq -c .roles.coder "$L/state.json")"
+assert_not_contains "no preset section without presets" "Role focus" "$(cat "$L/coder-brief.md")"
+assert_eq "reviewer presets still come from the config" '["senior-security"]' "$(jq -c .roles.reviewer "$L/state.json")"
+# an unknown preset refuses to start and leaves an active loop alone, even with --force
+OUT=$(start "$R" --force --reviewer-roles bogus "t3"); RC=$?
+assert_eq "unknown preset flag fails start" "1" "$RC"
+assert_contains "start names the unknown preset" "roles.reviewer: unknown role preset(s): bogus" "$OUT"
+assert_eq "the active loop survives the refused start" "$L" "$(pointer "$R")"
+assert_eq "the active loop stays active" "true" "$(st "$L" active)"
+# a hand-written config value that is not a list is refused too
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
+jq '.roles.coder = "senior-qa"' "$R/.review-loop.json" > "$R/c.tmp" && mv "$R/c.tmp" "$R/.review-loop.json"
+OUT=$(start "$R" "t4"); RC=$?
+assert_eq "a non-list roles value fails start" "1" "$RC"
+assert_contains "the message names the key" "roles.coder must be a list of role preset names" "$OUT"
+(cd "$R" && bash "$C" unset roles.coder roles.reviewer > /dev/null)
+assert_eq "unset drops the emptied roles object" "null" "$(jq .roles "$R/.review-loop.json")"
+# a preset that disappeared after the loop started fails review.sh by name
+start "$R" --reviewer-roles senior-qa "t5" > /dev/null; L=$(pointer "$R")
+jq '.roles.reviewer = ["gone-preset"]' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+echo y > "$R/g"; coder "$L" 1; verdicts approved
+OUT=$(review "$R"); RC=$?
+assert_eq "a missing frozen preset fails review.sh" "1" "$RC"
+assert_contains "review.sh names the missing preset" "roles.reviewer: unknown role preset(s): gone-preset" "$OUT"
+assert_no_file "no review installed on a missing preset" "$L/round-01-review.md"
+# legacy loops (no state.roles) run without presets
+jq 'del(.roles)' "$L/state.json" > "$L/s.tmp" && mv "$L/s.tmp" "$L/state.json"
+review "$R" > /dev/null
+assert_file "a loop without state.roles still reviews" "$L/round-01-review.md"
+assert_not_contains "a loop without state.roles has no preset section" "Role focus" "$(cat "$L/round-01-prompt.md")"
+# a replacement template without {{EXTRA}} still gets the presets appended
+printf 'MINIMAL {{TASK}}\n{{REVIEW_FORMAT}}\n' > "$R/docs/min-rev.md"
+start "$R" --reviewer-prompt docs/min-rev.md --reviewer-roles senior-qa "t6" > /dev/null; L=$(pointer "$R")
+echo z > "$R/h"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
+assert_contains "template without {{EXTRA}} still appends the presets" "## Role focus: Senior QA Engineer (preset senior-qa)" "$(cat "$L/round-01-prompt.md")"
+assert_not_contains "appended presets leave no placeholder" "{{" "$(cat "$L/round-01-prompt.md")"
+# the wizard offers the presets and accepts names
+OUT=$(cd "$R" && printf '\n\n\n\n\n\n\n\n\n\n\n\n\n\nsenior-qa,tdd-guide\n\nn\n' | bash "$C" init 2>&1)
+assert_contains "init lists the presets" "senior-architect — Senior Software Architect" "$OUT"
+assert_eq "init writes the chosen presets" '["senior-qa","tdd-guide"]' "$(jq -c .roles.reviewer "$R/.review-loop.json")"
+# the dashboard embeds the presets and the page helpers handle them
+(cd "$R" && bash "$S/dashboard.sh" > /dev/null)
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
+assert_eq "dashboard embeds the presets" "11" "$(jq '.config.roles | length' <<< "$D")"
+assert_eq "dashboard embeds the effective presets" '["senior-qa","tdd-guide"]' "$(jq -c .config.show.effective.roles.reviewer <<< "$D")"
+assert_eq "dashboard embeds each loop's frozen presets" '["senior-qa"]' "$(jq -c --arg id "$(basename "$L")" '.loops[] | select(.state.loop_id == $id) | .state.roles.reviewer' <<< "$D")"
+if command -v node > /dev/null 2>&1; then
+  DERIVE="$TMP/derive-presets.js"
+  sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
+  NOUT=$(node -e '
+    const RL = require(process.argv[1]);
+    const names = JSON.parse(process.argv[2]).map(p => p.name);
+    const k = { key: "roles.coder", type: "list" };
+    console.log([RL.validateValue(k, "senior-qa, tdd-guide", [], null, "", names), RL.validateValue(k, "senior-qa,nope,zip", [], null, "", names), RL.validateValue(k, "anything", [], null, "", [])].join("|"));
+    console.log(RL.validateValue({ key: "dashboard.dirs", type: "list" }, "nope", [], null, "", names) === "");
+    console.log([RL.togglePreset("a, b", "c", true), RL.togglePreset("a,b,c", "b", false), RL.togglePreset("", "a", true), RL.togglePreset("a", "a", true)].join("|"));
+    console.log([RL.rolesLabel({ reviewer: ["a", "b"], coder: [] }, "reviewer"), RL.rolesLabel({ reviewer: [] }, "coder"), String(RL.rolesLabel(undefined, "coder"))].join("|"));
+    const st = RL.roleStatus(RL.ROLES[1], { prompts: {}, roles: { coder: ["senior-qa"] } }, {});
+    console.log(st.presets.hidden + " " + st.presets.names.join(",") + " " + RL.roleStatus(RL.ROLES[0], { prompts: {}, roles: { reviewer: null } }, {}).presets.hidden);
+    console.log(RL.ROLES.map(d => d.presets).join(","));
+  ' "$DERIVE" "$(bash "$C" roles --json)")
+  assert_eq "validateValue: role presets checked against the list" "|unknown role presets nope, zip|" "$(sed -n 1p <<< "$NOUT")"
+  assert_eq "validateValue: other list keys are not checked" "true" "$(sed -n 2p <<< "$NOUT")"
+  assert_eq "togglePreset: adds, removes and keeps one copy" "a,b,c|a,c|a|a" "$(sed -n 3p <<< "$NOUT")"
+  assert_eq "rolesLabel: names, none, and legacy loops" "a, b|none|null" "$(sed -n 4p <<< "$NOUT")"
+  assert_eq "roleStatus: presets and hidden presets" "false senior-qa true" "$(sed -n 5p <<< "$NOUT")"
+  assert_eq "ROLES: each role names its presets key" "roles.reviewer,roles.coder" "$(sed -n 6p <<< "$NOUT")"
+else
+  echo "  skip  node not installed: role preset helpers not tested"
+fi
+(cd "$R" && bash "$S/cancel.sh" > /dev/null)
 
 section "model catalogs beside active configuration"
 R=$(new_repo catalog_paths)
