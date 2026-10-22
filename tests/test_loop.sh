@@ -1878,6 +1878,11 @@ if command -v node > /dev/null 2>&1; then
   else
     fail "dashboard keyboard and screen-reader wiring" "$OUT"
   fi
+  if OUT=$(node "$HERE/test_dashboard_ledger.js" "$S/../templates/dashboard.html" 2>&1); then
+    pass "dashboard comment trail: parsing, ledger and linked IDs"
+  else
+    fail "dashboard comment trail: parsing, ledger and linked IDs" "$OUT"
+  fi
   sed -n '/<script id="rl-derive">/,/<\/script>/p' "$S/../templates/dashboard.html" | sed '1d;$d' > "$DERIVE"
   MOUT=$(node -e '
     const RL = require(process.argv[1]);
@@ -1993,7 +1998,7 @@ assert_contains "configuration page has the grouped container" 'class="cfg-group
 assert_contains "the page has the start-a-loop view" 'class="view" id="view-start"' "$(cat "$R/.review-loop/dashboard.html")"
 assert_contains "header links to the start page" 'href="#/start"' "$(cat "$R/.review-loop/dashboard.html")"
 assert_eq "the start card lives only in the start view" "1" "$(grep -c 'id="card-start"' "$R/.review-loop/dashboard.html")"
-assert_contains "the start form offers an explicit inherit-configuration backend" 'inherit configuration' "$(cat "$R/.review-loop/dashboard.html")"
+assert_contains "the start form offers the configured backend explicitly" 'the configured backend' "$(cat "$R/.review-loop/dashboard.html")"
 mkdir -p "$HOME/.config/review-loop"; echo '{"prompts": {"coder": "SECRET-DIR/brief.md"}}' > "$HOME/.config/review-loop/config.json"
 (cd "$R" && bash "$S/dashboard.sh" > /dev/null)
 D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/.review-loop/dashboard.html")
@@ -2455,6 +2460,31 @@ else
   echo "  skip  node not installed: role preset helpers not tested"
 fi
 (cd "$R" && bash "$S/cancel.sh" > /dev/null)
+
+section "shared dashboard (--share)"
+R=$(new_repo share); rm -rf "$HOME/.config/review-loop"
+(cd "$R" && bash "$C" set max_rounds=4 prompts.coder_extra=docs/coder.md > /dev/null 2>&1); mkdir -p "$R/docs"; echo "Be brief." > "$R/docs/coder.md"
+start "$R" --usage --session abcdefgh1234 "share this task" > /dev/null; L=$(pointer "$R")
+echo s > "$R/s"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
+(cd "$R" && bash "$S/dashboard.sh" --share --out shared.html > /dev/null)
+P="$R/shared.html"
+D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$P")
+assert_eq "share: the page is marked shared" "true" "$(jq .share <<< "$D")"
+assert_eq "share: the project is named, not located" "$(basename "$R")" "$(jq -r .root <<< "$D")"
+assert_eq "share: no absolute project path anywhere in the page" "0" "$(grep -c -F "$R" "$P")"
+assert_eq "share: loop folders are project-relative" ".review-loop/$(basename "$L")" "$(jq -r '.loops[0].dir' <<< "$D")"
+assert_eq "share: no root, session or transcript in the state" "null null null" "$(jq -r '.loops[0].state | "\(.root) \(.session_id) \(.transcript_path)"' <<< "$D")"
+assert_eq "share: prompt files keep only their names" "coder.md" "$(jq -r '.loops[0].state.prompts.coder_extra' <<< "$D")"
+assert_eq "share: no configuration is embedded" "null 0" "$(jq -r '"\(.config.show) \(.config.keys | length)"' <<< "$D")"
+assert_eq "share: the record stays (rounds, verdict, usage)" "1 approved true" "$(jq -r '.loops[0] | "\(.files | length) \(.state.outcome) \(.state.usage)"' <<< "$D")"
+assert_eq "share: the session id is not in the page" "0" "$(grep -c abcdefgh1234 "$P")"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --share --serve 2>&1); RC=$?
+assert_eq "share: --serve is refused" "1" "$RC"
+assert_contains "share: the refusal explains why" "--share makes a read-only page" "$OUT"
+OUT=$(cd "$R" && bash "$S/dashboard.sh" --share --with-user-config 2>&1); RC=$?
+assert_eq "share: --with-user-config is refused" "1" "$RC"
+(cd "$R" && bash "$S/dashboard.sh" --out own.html > /dev/null)
+assert_eq "an ordinary page is not shared" "null" "$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$R/own.html" | jq .share)"
 
 section "model catalogs beside active configuration"
 R=$(new_repo catalog_paths)

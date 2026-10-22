@@ -10,7 +10,7 @@ function setup(served) {
   const nodes = new Map(), timers = new Map();
   let timerId = 0;
   const $ = key => {
-    if (!nodes.has(key)) nodes.set(key, { textContent: '', disabled: false, classList: { toggle() {} }, querySelectorAll: () => [] });
+    if (!nodes.has(key)) nodes.set(key, { textContent: '', disabled: false, style: {}, classList: { toggle() {} }, querySelectorAll: () => [] });
     return nodes.get(key);
   };
   const ctx = {

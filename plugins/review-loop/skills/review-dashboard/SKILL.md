@@ -1,7 +1,7 @@
 ---
 name: review-dashboard
 description: Generate and open an HTML dashboard of all review loops in this project (outcomes, rounds, usage, and the full comment trail per loop).
-argument-hint: "[--dir DIR] [--out FILE] [--no-open] [--serve [--port N]]"
+argument-hint: "[--dir DIR] [--out FILE] [--no-open] [--serve [--port N]] [--share]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/dashboard.sh *)
@@ -24,3 +24,10 @@ configuration page (`#/config`, header button), which lets the user edit the con
 `config.sh` command to run (or saves the file via the browser); with `--serve`
 changes apply directly. `--serve` keeps running until Ctrl-C, so only use it
 when the user asks for it, and run it in the background.
+
+When the user wants to send a review to someone else, use `--share` with an
+`--out` file (for example `--share --out review.html`). It writes a read-only
+page with no Start or Configuration pages, no configuration, local paths or
+session data, and a short primer on each loop page. It cannot be combined with
+`--serve` or `--with-user-config`. Tell the user that the round files are
+embedded as written, so anything they wrote in a summary stays.
