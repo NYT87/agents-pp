@@ -312,7 +312,7 @@ Plain and low-key; a button looks like a control, not a call to action.
 - **Removed / Error:** the label turns to the critical text colour (struck through when removed). Error text uses the same colour.
 - **Source note:** a muted 11px line under each field names the config file it came from.
 - **Placeholder:** Muted, which keeps examples at 4.5:1. Placeholders are examples, never labels.
-- **Checkbox:** native, tinted with the ink action through `accent-color`, never the browser's blue.
+- **Checkbox:** native, tinted with the ink action through `accent-color`, never the browser's blue. Its wrapper is a label for it, so on touch (`pointer: coarse`) the 24px box sits in a 44×44px tap target.
 - **Preset picker:** a fieldset of checkboxes under a role's presets field, in fluid 220px columns. Each option shows its title, its monospace name (with "· default" for the role's defaults) and a one-line summary in Ink Secondary. The checkboxes and the comma-separated field edit the same value.
 
 ### Tables

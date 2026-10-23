@@ -208,7 +208,7 @@
   .cfg-row .tools { float: right; }
   button.mini { font-size: 11px; padding: 0 6px; margin-left: 4px; min-height: 24px; }
   .cfg-row .src:has(> button.mini) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; } .cfg-row .src > button.mini { margin-left: 0; }
-  .cfg-row .check { display: flex; align-items: center; gap: 8px; }
+  .cfg-row .check { display: flex; align-items: center; gap: 8px; width: fit-content; }
   /* simple mode: where each value comes from, and the per-field write/unset
      tools, appear only when "Show where values come from" is on */
   .cfg-simple .cfg-row .src-note, .cfg-simple .cfg-row .tools, .cfg-simple .scope-ctl { display: none; }
@@ -273,6 +273,8 @@
     button.mini { min-height: 36px; padding: 0 10px; }
     input, select, textarea { font-size: 16px; }
     input[type=checkbox] { width: 24px; height: 24px; }
+    /* the box stays 24px; its label around it is the 44px tap target */
+    .cfg-row .check { min-width: 44px; min-height: 44px; cursor: pointer; } fieldset.role-picks label { min-height: 44px; align-items: center; }
     fieldset.role-picks input { margin-top: 0; }
     .crumbs a, header h1 a { display: inline-flex; align-items: center; min-height: 44px; }
     details > summary { padding: 12px 0; }
@@ -1511,7 +1513,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       if (k.key === 'backend') input = `<select ${ctl} ${removed ? 'disabled' : ''}>${(CFG.backends || []).map(b => `<option ${b === v ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(v) ? '' : `<option value="${esc(v)}" selected>${v === '' ? 'the configured backend (hidden on this page)' : esc(v)}</option>`}</select>`;
       else if (k.key === 'model' || k.key === 'effort') input = catalogSelect(k.key, v, cat, sc.form.model, ctl, removed)
         + (k.key === 'model' ? catalogActions('cfg-model', sc.form.backend) : '');
-      else if (k.type === 'boolean') input = `<span class="check"><input type="checkbox" ${ctl} ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}></span>`;
+      else if (k.type === 'boolean') input = `<label class="check" for="cfg-f-${k.key}"><input type="checkbox" ${ctl} ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}></label>`;
       else if (k.type === 'integer') input = `<input type="number" min="1" step="1" ${ctl} value="${esc(v)}" ${removed ? 'disabled' : ''}>`;
       else input = `<input type="text" ${ctl} value="${esc(v)}" placeholder="${esc(LIST_EXAMPLES[k.key] || '')}" ${removed ? 'disabled' : ''}>`;
       const inTarget = targetHas(k.key);
@@ -1769,7 +1771,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       <div class="cfg-row"><label for="start-f-model">Reviewer model</label>${catalogSelect('model', st.model, cat, st.model, 'data-start="model" id="start-f-model"', false)}${catalogActions('start-model', st.backend || eff.backend)}</div>
       <div class="cfg-row"><label for="start-f-effort">Reasoning effort</label>${catalogSelect('effort', st.effort, cat, st.model, 'data-start="effort" id="start-f-effort"', false)}</div>
       <div class="cfg-row"><label for="start-f-max_rounds">Round cap</label><input type="number" min="1" step="1" data-start="max_rounds" id="start-f-max_rounds" value="${esc(st.max_rounds)}"></div>
-      <div class="cfg-row"><label for="start-f-usage">Track token usage</label><span class="check"><input type="checkbox" data-start="usage" id="start-f-usage" ${st.usage ? 'checked' : ''}></span></div>`; });
+      <div class="cfg-row"><label for="start-f-usage">Track token usage</label><label class="check" for="start-f-usage"><input type="checkbox" data-start="usage" id="start-f-usage" ${st.usage ? 'checked' : ''}></label></div>`; });
     // While another loop runs, the form is read-only (see the banner).
     const locked = !!activeLoop();
     const task = $('#start-task'); if (task) task.disabled = locked;
@@ -1888,7 +1890,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       ${verdictBand(l, ledger)}
       ${verdicts.mismatch ? `<p class="record-note">The loop's record (state.json) lists ${verdicts.recorded} round${verdicts.recorded === 1 ? '' : 's'}, and ${verdicts.onDisk} review file${verdicts.onDisk === 1 ? ' is' : 's are'} on disk. The rounds below come from the files.</p>` : ''}
       ${SHARE ? PRIMER : ''}
-      ${ledgerHtml(l)}
+      ${ledgerHtml(l, ledger)}
       <details class="run-details"><summary>Run details</summary><div class="kv">
         <span>id <b class="mono">${esc(l.id)}</b></span><span>reviewer <b>${esc(l.st.backend)}${l.st.model ? ' / ' + esc(l.st.model) : ''}${l.st.effort ? ' @ ' + esc(l.st.effort) : ''}</b></span>
         <span>rounds <b>${esc(RL.roundProgress(l))}</b>${l.extendedRounds ? ` <span class="src">(extended +${l.extendedRounds})</span>` : ''}</span><span>started <b>${esc(fmtDate(l.st.started_at))}</b></span>
@@ -1901,7 +1903,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       ${roundsHtml ? verdictBand(l, ledger, true) : ''}
       ${l.summary ? `<details class="summary-file"><summary>Loop summary file (summary.md)</summary><div class="doc" role="region" aria-label="Loop summary"><div class="md">${md(l.summary)}</div></div></details>` : ''}
     </div>`;
-    linkComments(d, l);
+    linkComments(d, l, ledger);
     // A pane that scrolls must be reachable by keyboard to scroll it.
     d.querySelectorAll('.doc').forEach(p => { if (p.scrollHeight > p.clientHeight + 1 || p.scrollWidth > p.clientWidth + 1) p.tabIndex = 0; });
   }
@@ -1913,9 +1915,9 @@ if (typeof module !== 'undefined') module.exports = RL;
   }
   // The ledger: each comment once, with what the coder and the reviewer said
   // about it in later rounds, and where it stands now.
-  function ledgerHtml(l) {
+  function ledgerHtml(l, ledger) {
     if (!l.files.some(f => f.review)) return '';
-    const list = RL.commentLedger(l.files);
+    const list = ledger || RL.commentLedger(l.files);
     // Notes are Markdown like the files they come from (code spans, IDs).
     const inl = t => md(t).replace(/^<p>([\s\S]*)<\/p>$/, '$1');
     const say = (who, s, extra) => `${who} <b>${esc(s)}</b>${extra ? ': ' + inl(extra) : ''}`;
@@ -1938,8 +1940,8 @@ if (typeof module !== 'undefined') module.exports = RL;
   // comment where it was raised; pointing at or focusing one highlights every
   // mention of the same ID. Links never change the hash (the page is
   // hash-routed): they scroll to the comment and move focus there.
-  function linkComments(d, l) {
-    const known = new Set(RL.commentLedger(l.files).filter(c => c.raised).map(c => c.id));
+  function linkComments(d, l, ledger) {
+    const known = new Set((ledger || RL.commentLedger(l.files)).filter(c => c.raised).map(c => c.id));
     // The raised comment: its block in the reviewer's pane carries
     // data-cid-at; a free-form review (older loops) has a "### R1-C2" heading.
     d.querySelectorAll('.doc.reviewer .md-h3').forEach(h => {

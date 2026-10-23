@@ -146,7 +146,7 @@ eq(settled[0].steps.map(x => x.round), [2], 'a settled grade re-worded in a late
 
 // The loop view: the ledger sits above the rounds, IDs become links that
 // never change the hash, and each agent's pane carries its voice colour.
-assert.match(html, /\$\{verdictBand\(l, ledger\)\}[\s\S]*?\$\{ledgerHtml\(l\)\}[\s\S]*?<details class="run-details">[\s\S]*?\$\{roundsHtml/, 'verdict line, then the ledger, then folded run details, then the rounds');
+assert.match(html, /\$\{verdictBand\(l, ledger\)\}[\s\S]*?\$\{ledgerHtml\(l, ledger\)\}[\s\S]*?<details class="run-details">[\s\S]*?\$\{roundsHtml/, 'verdict line, then the ledger, then folded run details, then the rounds');
 assert.match(html, /<details class="summary-file"><summary>Loop summary file \(summary\.md\)<\/summary>/, 'summary.md is folded at the end');
 
 // Verdicts come from state.json, or from the review file when a round has no record.
@@ -276,6 +276,14 @@ assert.match(html, /\.ledger \.lead \{[^}]*text-wrap: pretty;/, 'the ledger lead
   assert.match(html, /where = c\.file \? fileRef\(c\.file, c\.line\)/, 'in the ledger too');
   // Every round folds; a followed link opens the round that holds its target.
   assert.match(html, /if \(x\.tagName === 'DETAILS'\) x\.open = true;/, 'following an ID opens its folded round');
+  // One ledger per render: renderDetail builds it and hands it to the ledger table and the ID links.
+  assert.match(html, /linkComments\(d, l, ledger\);/);
+  assert.equal((html.match(/RL\.commentLedger\(l\.files\)/g) || []).length, 3, 'renderDetail parses once; ledgerHtml and linkComments only fall back');
+  assert.match(html, /const list = ledger \|\| RL\.commentLedger\(l\.files\);/);
+  // Checkboxes: the wrapper is a label for the box, a 44px tap target on touch.
+  assert.match(html, /<label class="check" for="cfg-f-\$\{k\.key\}"><input type="checkbox"/);
+  assert.match(html, /<label class="check" for="start-f-usage"><input type="checkbox"/);
+  assert.match(html, /\.cfg-row \.check \{ min-width: 44px; min-height: 44px;/);
   // Snippets: whole words, never ending inside a code span.
   assert.equal(RL.snippet('short text'), 'short text');
   assert.equal(RL.snippet('one two three four five six', 14), 'one two three…');
