@@ -228,12 +228,12 @@ rl_config_files() {
 }
 
 # rl_resolve_config -> JSON with dir, max_rounds, backend, model, usage,
-# dashboard {dirs, out, open, auto}. Nested objects merge key by key.
+# dashboard {dirs, out, open, auto}, prompts {...}, roles {reviewer, coder}. Nested objects merge key by key.
 # Precedence (low -> high): defaults, the files from rl_config_files in order
 # (for a shared file: its top-level keys, then its providers.<provider>
 # section), REVIEW_LOOP_* env. Flags are applied by start.sh.
 rl_resolve_config() {
-  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","effort":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false},"prompts":{"reviewer":"","reviewer_extra":"","coder":"","coder_extra":""}}'
+  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","effort":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false},"prompts":{"reviewer":"","reviewer_extra":"","coder":"","coder_extra":""},"roles":{"reviewer":["code-reviewer","senior-security"],"coder":["senior-qa"]}}'
   local cfg="$defaults" env_cfg label path kind file_cfg p merged
   p=$(rl_provider)
   while IFS=$'\t' read -r label path kind; do
@@ -319,22 +319,84 @@ rl_render() {
   printf '%s' "$text"
 }
 
-# rl_role_prompt ROOT ROLE DEFAULT_TEMPLATE REPLACEMENT EXTRA -> the role's
-# template text: the replacement file (if set) or DEFAULT_TEMPLATE, with the
-# extra file (if set) available as {{EXTRA}} wrapped in a heading, else "".
+# ── Role presets ─────────────────────────────────────────────────────────────
+# templates/roles/<name>.md: front matter (title, summary, group, source) and a
+# body of focus instructions usable by either agent. Config roles.reviewer /
+# roles.coder list preset names; start.sh freezes them in state.roles and
+# rl_role_prompt renders each one into {{EXTRA}}, before the extra file.
+RL_ROLES_DIR="$RL_TEMPLATES_DIR/roles"
+
+rl_role_preset_valid() { # NAME -> 0 when a preset of that name exists
+  [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -f "$RL_ROLES_DIR/$1.md" ]
+}
+rl_role_preset_field() { # FILE FIELD -> the front-matter value ("" when absent)
+  awk -v f="$2" 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { exit }
+    fm && index($0, f ": ") == 1 { print substr($0, length(f) + 3); exit }' "$1"
+}
+rl_role_preset_body() { # FILE -> the text after the front matter
+  awk 'NR == 1 && $0 == "---" { fm = 1; next } fm == 1 && $0 == "---" { fm = 2; next } fm != 1' "$1"
+}
+
+# rl_role_presets -> JSON array of {name, title, summary, group, source},
+# sorted by group then name.
+rl_role_presets() {
+  local f n
+  for f in "$RL_ROLES_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    n=$(basename "$f" .md); rl_role_preset_valid "$n" || continue
+    jq -cn --arg n "$n" --arg t "$(rl_role_preset_field "$f" title)" --arg s "$(rl_role_preset_field "$f" summary)" \
+      --arg g "$(rl_role_preset_field "$f" group)" --arg src "$(rl_role_preset_field "$f" source)" \
+      '{name: $n, title: (if $t == "" then $n else $t end), summary: $s, group: $g, source: $src}'
+  done | jq -sc 'sort_by(.group, .name)'
+}
+
+# rl_check_role_presets LABEL NAMES_JSON -> 0 when NAMES_JSON is an array of
+# existing preset names; otherwise prints a message naming LABEL and returns 1.
+rl_check_role_presets() {
+  local n bad=()
+  jq -e 'type == "array" and all(.[]; type == "string" and test("^[a-z0-9][a-z0-9-]*$"))' <<< "$2" > /dev/null 2>&1 \
+    || { echo "$1 must be a list of role preset names (see: config.sh roles)"; return 1; }
+  while IFS= read -r n; do rl_role_preset_valid "$n" || bad+=("$n"); done < <(jq -r '.[]' <<< "$2")
+  [ "${#bad[@]}" -eq 0 ] && return 0
+  echo "$1: unknown role preset(s): ${bad[*]} (available: $(rl_role_presets | jq -r 'map(.name) | join(" ")'))"
+  return 1
+}
+
+# rl_role_preset_text ROLE NAMES_JSON -> one "## Role focus" section per
+# preset, separated by blank lines ("" for none); dies on a missing preset.
+rl_role_preset_text() {
+  local msg n f out=""
+  [ "$(jq -r 'length' <<< "${2:-[]}")" = "0" ] && return 0
+  msg=$(rl_check_role_presets "roles.$1" "$2") || rl_die "$msg"
+  while IFS= read -r n; do
+    f="$RL_ROLES_DIR/$n.md"
+    [ -n "$out" ] && out="$out"$'\n\n'
+    out="$out## Role focus: $(rl_role_preset_field "$f" title) (preset $n)"$'\n\n'"$(rl_role_preset_body "$f")" || rl_die "cannot read role preset $f"
+  done < <(jq -r '.[]' <<< "$2")
+  printf '%s' "$out"
+}
+
+# rl_role_prompt ROOT ROLE DEFAULT_TEMPLATE REPLACEMENT EXTRA [PRESETS_JSON] ->
+# the role's template text: the replacement file (if set) or DEFAULT_TEMPLATE,
+# with {{EXTRA}} holding the role presets' sections and then the extra file
+# (if set) wrapped in a heading, else "".
 rl_role_prompt() {
-  local root="$1" role="$2" default="$3" repl="$4" extra="$5" tpl extra_text="" f
+  local root="$1" role="$2" default="$3" repl="$4" extra="$5" presets="${6:-[]}" tpl extra_text="" f
   # Every missing, unreadable or failed read is an error (rl_prompt_file and
   # rl_read_prompt die); the "|| exit 1" propagates it out of the command
   # substitution the callers use.
   f=$(rl_prompt_file "$root" "$repl" "$role" "") || exit 1
   if [ -n "$f" ]; then tpl=$(rl_read_prompt "$f" "prompts.$role") || exit 1
   else tpl=$(rl_read_prompt "$default" "the default $role template") || exit 1; fi
+  extra_text=$(rl_role_preset_text "$role" "$presets") || exit 1
   f=$(rl_prompt_file "$root" "$extra" "$role" "_extra") || exit 1
   if [ -n "$f" ]; then
-    extra_text="## Additional instructions for the $role (from $f)"$'\n\n'"$(rl_read_prompt "$f" "prompts.${role}_extra")" || exit 1
-    # A replacement template without {{EXTRA}} still gets the extras appended:
-    # the key promises appended instructions, so they must never vanish.
+    [ -n "$extra_text" ] && extra_text="$extra_text"$'\n\n'
+    extra_text="$extra_text## Additional instructions for the $role (from $f)"$'\n\n'"$(rl_read_prompt "$f" "prompts.${role}_extra")" || exit 1
+  fi
+  # A replacement template without {{EXTRA}} still gets the extras appended:
+  # the keys promise appended instructions, so they must never vanish.
+  if [ -n "$extra_text" ]; then
     case "$tpl" in *'{{EXTRA}}'*) ;; *) tpl="$tpl"$'\n\n{{EXTRA}}' ;; esac
   fi
   rl_render "$tpl" "EXTRA=$extra_text"
@@ -349,7 +411,8 @@ rl_coder_brief() {
   prompts=$(jq -c '.prompts // {}' "$dir/state.json")
   root=$(rl_state_get "$dir" root)
   brief=$(rl_role_prompt "$root" coder "$RL_TEMPLATES_DIR/coder-brief.md" \
-    "$(jq -r '.coder // ""' <<< "$prompts")" "$(jq -r '.coder_extra // ""' <<< "$prompts")") || exit 1
+    "$(jq -r '.coder // ""' <<< "$prompts")" "$(jq -r '.coder_extra // ""' <<< "$prompts")" \
+    "$(jq -c '.roles.coder // []' "$dir/state.json")") || exit 1
   rl_render "$brief" "LOOP_ID=$(rl_state_get "$dir" loop_id)" "TASK=$(cat "$dir/task.md")" "LOOP_DIR=$dir" \
     "SCRIPTS=$RL_SCRIPTS_DIR" "TEMPLATES=$RL_TEMPLATES_DIR" "BACKEND=$(rl_state_get "$dir" backend)" \
     "MAX_ROUNDS=$(rl_state_get "$dir" max_rounds)" "ROOT=$root"

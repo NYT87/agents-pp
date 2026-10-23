@@ -2,13 +2,16 @@
 # review-loop — generate a self-contained HTML dashboard of all review loops.
 #
 # Usage: dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open] [--serve [--port N]]
-#                     [--with-user-config]
+#                     [--with-user-config] [--share]
 #   --dir DIR   storage dir to scan (repeatable; default: config dashboard.dirs,
 #               or the configured loop dir)
 #   --out FILE  where to write the page (default: config dashboard.out, or
 #               <dir>/dashboard.html)
 #   --open      open the page in the default browser afterwards
 #   --no-open   do not open it (default comes from config dashboard.open, true)
+#   --share     a read-only page to send to someone else: no Start or
+#               Configuration pages, no configuration, local paths or session
+#               data in the page, and a short primer on each loop page
 # Config (.claude/review-loop.json or ~/.claude/review-loop.json):
 #   {"dashboard": {"dirs": [".review-loop"], "out": "docs/loops.html",
 #                  "open": true, "auto": false}}
@@ -36,7 +39,7 @@ set -euo pipefail
 
 command -v jq > /dev/null 2>&1 || rl_die "'jq' is required"
 
-DIRS=() OUT="" OPEN="" SERVE=0 PORT=8765 SERVE_TOKEN="" WITH_USER=0
+DIRS=() OUT="" OPEN="" SERVE=0 PORT=8765 SERVE_TOKEN="" WITH_USER=0 SHARE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIRS+=("${2:-}"); shift 2 ;;
@@ -50,10 +53,15 @@ while [ $# -gt 0 ]; do
     --port=*) PORT="${1#*=}"; shift ;;
     --serve-token) SERVE_TOKEN="${2:-}"; shift 2 ;;   # internal: regeneration by the server
     --with-user-config) WITH_USER=1; shift ;;
+    --share) SHARE=1; shift ;;
     -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) rl_die "unknown argument '$1'" ;;
   esac
 done
+if [ "$SHARE" = "1" ]; then
+  [ "$SERVE" = "0" ] && [ -z "$SERVE_TOKEN" ] || rl_die "--share makes a read-only page; it cannot be combined with --serve"
+  [ "$WITH_USER" = "0" ] || rl_die "--share never embeds configuration; drop --with-user-config"
+fi
 printf '%s' "$PORT" | grep -qE '^[0-9]{1,5}$' && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || rl_die "invalid port '$PORT' (1-65535)"
 
 ROOT="$PWD"
@@ -113,9 +121,10 @@ done < <(sort -t "$(printf '\t')" -k1,1 -u -s "$CANDIDATES")
 
 # Configuration, as config.sh reports it, so the page can show and edit it; the
 # default role templates are embedded too, so the agent-roles section can show
-# what each role runs with and which {{placeholders}} a replacement may use.
+# what each role runs with and which {{placeholders}} a replacement may use, and
+# the keys list carries the role presets the roles.* keys can pick from.
 (cd "$ROOT" && bash "$RL_SCRIPTS_DIR/config.sh" show --json) > "$WORK/config-show.json" 2>/dev/null || echo 'null' > "$WORK/config-show.json"
-bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/null || echo '{"keys":[],"backends":[]}' > "$WORK/config-keys.json"
+bash "$RL_SCRIPTS_DIR/config.sh" keys --json > "$WORK/config-keys.json" 2>/dev/null || echo '{"keys":[],"backends":[],"roles":[]}' > "$WORK/config-keys.json"
 # Each backend's model catalog, so the page can offer models and efforts.
 echo '{}' > "$WORK/models.json"
 while IFS= read -r b; do
@@ -160,11 +169,36 @@ jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" --arg script "$RL_SCRIPTS_DIR/co
   --arg home "$HOME" --arg ucfg "$(rl_user_config_dir)/config.json" \
   --rawfile rtpl "$RL_TEMPLATES_DIR/reviewer-prompt.md" --rawfile ctpl "$RL_TEMPLATES_DIR/coder-brief.md" \
   '{generated_at: $t, root: $root, loops: (sort_by([.state.started_at, .state.loop_id]) | reverse),
-    config: {show: $show[0], keys: $keys[0].keys, backends: $keys[0].backends, script: $script,
+    config: {show: $show[0], keys: $keys[0].keys, backends: $keys[0].backends, roles: ($keys[0].roles // []), script: $script,
              provider_files: $pf[0], home: $home, user_shared: $ucfg, models: $models[0]},
     templates: {reviewer: $rtpl, coder: $ctpl},
     serve: (if $token == "" then null else {token: $token} end)}' \
-  "$LOOPS_FILE" | sed 's|</|<\\/|g' > "$WORK/data.json"
+  "$LOOPS_FILE" > "$WORK/data-full.json"
+if [ "$SHARE" = "1" ]; then
+  # A shared page keeps the record (tasks, rounds, verdicts, usage) and drops
+  # everything about the sender's machine: configuration, absolute paths,
+  # session and transcript data. Loop folders become project-relative, and so
+  # does every path the agents wrote into their files (the project root
+  # becomes relative, the home directory "~").
+  jq -c --arg root "$ROOT" --arg home "${HOME:-}" '
+    def rel: if startswith($root + "/") then .[($root | length) + 1:] else (split("/") | last) end;
+    ($root | split("/") | last) as $project
+    # A path inside the root or home ("root/", "home/") is cut at the slash; the
+    # root or home on its own is replaced only where the path name ends, so
+    # /Users/alice becomes "~" but /Users/alicebob is left alone.
+    | def esc_re: gsub("(?<c>[\\\\.^$|?*+()\\[\\]{}])"; "\\\(.c)");
+      def bare($p; $to): gsub(($p | esc_re) + "(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_-])"; $to);
+      def scrub: if type == "string" then split($root + "/") | join("") | bare($root; $project)
+        | (if $home != "" and $home != "/" then split($home + "/") | join("~/") | bare($home; "~") else . end) else . end;
+    .share = true | .project = $project | .root = .project
+    | .config = {show: null, keys: [], backends: [], roles: [], models: {}, provider_files: []}
+    | .loops |= map(.dir |= rel
+        | .state |= (del(.root, .session_id, .transcript_path, .sessions, .coder_usage_base, .coder_usage_cum, .coder_usage_carry)
+            | if (.prompts | type) == "object" then .prompts |= map_values(if type == "string" and . != "" then split("/") | last else . end) else . end)
+        | walk(scrub))' \
+    "$WORK/data-full.json" > "$WORK/data-share.json" && mv "$WORK/data-share.json" "$WORK/data-full.json"
+fi
+sed 's|</|<\\/|g' "$WORK/data-full.json" > "$WORK/data.json"
 
 # ── Render ───────────────────────────────────────────────────────────────────
 FIRST_ABS=$(rl_abs_dir "$ROOT" "${DIRS[0]}")

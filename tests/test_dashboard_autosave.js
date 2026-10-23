@@ -10,7 +10,7 @@ function setup(served) {
   const nodes = new Map(), timers = new Map();
   let timerId = 0;
   const $ = key => {
-    if (!nodes.has(key)) nodes.set(key, { textContent: '', disabled: false, classList: { toggle() {} }, querySelectorAll: () => [] });
+    if (!nodes.has(key)) nodes.set(key, { textContent: '', disabled: false, style: {}, classList: { toggle() {} }, querySelectorAll: () => [] });
     return nodes.get(key);
   };
   const ctx = {
@@ -76,6 +76,34 @@ function setup(served) {
   assert.equal(timers.size, 0, 'invalid values are not auto-saved');
   assert.equal($('#cfg-apply').disabled, true);
 
+  // Role preset checkboxes save on change like any other edit; unchecking
+  // every box writes an empty list (defaults off), never an unset.
+  const roles = setup(true), rc = roles.ctx;
+  rc.CFG.keys = [{ key: 'roles.coder', type: 'list' }];
+  rc.CFG.roles = [{ name: 'senior-qa' }, { name: 'tdd-guide' }];
+  rc.CFG.show.effective = { roles: { coder: ['senior-qa'] } };
+  rc.cfgState.form = { 'roles.coder': 'senior-qa' }; rc.cfgState.initial = { 'roles.coder': 'senior-qa' };
+  const roleBodies = [];
+  rc.fetch = async (url, options) => {
+    const body = JSON.parse(options.body); roleBodies.push(body);
+    const coder = String(body.set['roles.coder']).split(',').filter(Boolean);
+    return { ok: true, json: async () => ({ ok: true, output: '', show: { effective: { roles: { coder } }, files: [] }, launch_effective: {} }) };
+  };
+  rc.cfgPickPreset('roles.coder', 'tdd-guide', true);
+  assert.equal(roles.$('[data-key="roles.coder"]').value, 'senior-qa,tdd-guide', 'the text field follows the checkbox');
+  assert.equal(roles.timers.size, 1, 'a checkbox change schedules an auto-save');
+  await roles.runTimer();
+  assert.equal(roleBodies[0].set['roles.coder'], 'senior-qa,tdd-guide');
+  assert.match(roles.$('#cfg-out').textContent, /Saved automatically/);
+  rc.cfgPickPreset('roles.coder', 'senior-qa', false); rc.cfgPickPreset('roles.coder', 'tdd-guide', false);
+  assert.equal(roles.timers.size, 1, 'quick clicks debounce into one save');
+  await roles.runTimer();
+  assert.equal(roleBodies.length, 2);
+  assert.equal(roleBodies[1].set['roles.coder'], '', 'unchecking all stores an empty list');
+  assert.deepEqual(roleBodies[1].unset, []);
+  rc.cfgPickPreset('roles.coder', 'bogus', true);
+  assert.equal(roles.timers.size, 0, 'an unknown preset is not auto-saved');
+
   const local = setup(false);
   let fileText = '{"untouched":9007199254740999,"model":""}', writes = 0;
   local.ctx.handle = {
@@ -101,6 +129,7 @@ function setup(served) {
   // alongside auto-save; editing another provider must never change what the
   // server inherits, and a previously opened form must refresh its preview.
   const launch = setup(true), lc = launch.ctx;
+  lc.esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   lc.CFG.keys = [{ key: 'max_rounds', type: 'integer' }];
   const original = { backend: 'codex', model: '', effort: '', max_rounds: 5, usage: false };
   lc.launchEffective = { ...original };

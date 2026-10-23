@@ -2,7 +2,7 @@
 # review-loop — start a new coder/reviewer loop in the current project.
 #
 # Usage: start.sh [--backend NAME] [--model MODEL] [--effort LEVEL] [--max-rounds N] [--dir DIR]
-#                 [--force] [--git-exclude] <task description>
+#                 [--reviewer-roles LIST] [--coder-roles LIST] [--force] [--git-exclude] <task description>
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -28,6 +28,10 @@ Options:
   --coder-extra FILE       append FILE to the coder brief
                      (config keys prompts.reviewer, prompts.reviewer_extra, prompts.coder,
                      prompts.coder_extra; paths are absolute, ~/..., or project-relative)
+  --reviewer-roles LIST    role presets for the reviewer, comma-separated (list: config.sh roles);
+                     --reviewer-roles "" uses none even when the config sets some
+  --coder-roles LIST       role presets for the coder, likewise (config keys roles.reviewer,
+                     roles.coder)
   --force            cancel an already active loop first
   --git-exclude      add the loop dir and pointer to .git/info/exclude
   -h, --help         show this help
@@ -42,6 +46,7 @@ HELP
 
 FLAG_BACKEND="" FLAG_MODEL="" FLAG_EFFORT="" FLAG_MODEL_SET=0 FLAG_EFFORT_SET=0 FLAG_MAX="" FLAG_DIR="" FLAG_SESSION="" FLAG_USAGE="" FORCE=0 GIT_EXCLUDE=0
 FLAG_P_REVIEWER="" FLAG_P_REVIEWER_EXTRA="" FLAG_P_CODER="" FLAG_P_CODER_EXTRA=""
+FLAG_R_REVIEWER="" FLAG_R_REVIEWER_SET=0 FLAG_R_CODER="" FLAG_R_CODER_SET=0
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -65,6 +70,10 @@ while [ $# -gt 0 ]; do
     --coder-prompt=*) FLAG_P_CODER="${1#*=}"; shift ;;
     --coder-extra) FLAG_P_CODER_EXTRA="${2:-}"; shift 2 ;;
     --coder-extra=*) FLAG_P_CODER_EXTRA="${1#*=}"; shift ;;
+    --reviewer-roles) FLAG_R_REVIEWER="${2:-}"; FLAG_R_REVIEWER_SET=1; shift 2 ;;
+    --reviewer-roles=*) FLAG_R_REVIEWER="${1#*=}"; FLAG_R_REVIEWER_SET=1; shift ;;
+    --coder-roles) FLAG_R_CODER="${2:-}"; FLAG_R_CODER_SET=1; shift 2 ;;
+    --coder-roles=*) FLAG_R_CODER="${1#*=}"; FLAG_R_CODER_SET=1; shift ;;
     --usage) FLAG_USAGE="true"; shift ;;
     --no-usage) FLAG_USAGE="false"; shift ;;
     --force) FORCE=1; shift ;;
@@ -107,6 +116,13 @@ CFG=$(jq -c --arg r "$FLAG_P_REVIEWER" --arg re "$FLAG_P_REVIEWER_EXTRA" --arg c
     + (if $re != "" then {reviewer_extra: $re} else {} end)
     + (if $c != "" then {coder: $c} else {} end)
     + (if $ce != "" then {coder_extra: $ce} else {} end))' <<< "$CFG")
+# --reviewer-roles / --coder-roles given at all (even empty) replace the
+# configured list; a repeated name is kept once.
+CFG=$(jq -c --arg r "$FLAG_R_REVIEWER" --argjson rset "$FLAG_R_REVIEWER_SET" --arg c "$FLAG_R_CODER" --argjson cset "$FLAG_R_CODER_SET" '
+  def names: split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""));
+  .roles = ((.roles // {})
+    + (if $rset == 1 then {reviewer: ($r | names)} else {} end)
+    + (if $cset == 1 then {coder: ($c | names)} else {} end))' <<< "$CFG")
 
 BACKEND=$(jq -r .backend <<< "$CFG")
 MODEL=$(jq -r .model <<< "$CFG")
@@ -115,7 +131,12 @@ MAX_ROUNDS=$(jq -r .max_rounds <<< "$CFG")
 DIR=$(jq -r .dir <<< "$CFG")
 USAGE=$(jq -r '.usage == true' <<< "$CFG")
 PROMPTS=$(jq -c '.prompts // {} | {reviewer: (.reviewer // ""), reviewer_extra: (.reviewer_extra // ""), coder: (.coder // ""), coder_extra: (.coder_extra // "")}' <<< "$CFG")
-# Prompt files must exist before anything is created or cancelled.
+ROLES=$(jq -c '.roles // {} | map_values(if type == "array" then reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end) else . end)
+  | {reviewer: (.reviewer // []), coder: (.coder // [])}' <<< "$CFG")
+# Role presets and prompt files must exist before anything is created or cancelled.
+for role in reviewer coder; do
+  MSG=$(rl_check_role_presets "roles.$role" "$(jq -c --arg r "$role" '.[$r]' <<< "$ROLES")") || rl_die "$MSG"
+done
 for role in reviewer coder; do
   for suffix in "" _extra; do
     rl_prompt_file "$ROOT" "$(jq -r --arg k "$role$suffix" '.[$k]' <<< "$PROMPTS")" "$role" "$suffix" > /dev/null
@@ -133,8 +154,11 @@ case "$BACKEND" in
 esac
 
 # Git base reference
-BASE_REF="null"
+BASE_REF="null" BRANCH=""
 if git -C "$ROOT" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  # The branch the change is on, for the record: empty on a detached HEAD, and
+  # known before the first commit too (HEAD names its branch from git init).
+  BRANCH=$(git -C "$ROOT" symbolic-ref --short -q HEAD 2>/dev/null || true)
   if BASE_SHA=$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null); then
     BASE_REF="\"$BASE_SHA\""
   else
@@ -157,9 +181,9 @@ printf '%s\n' "$TASK" > "$LOOP_DIR/task.md"
 
 jq -n \
   --arg id "$LOOP_ID" --arg be "$BACKEND" --arg model "$MODEL" --arg effort "$EFFORT" --argjson mr "$MAX_ROUNDS" \
-  --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" --argjson prompts "$PROMPTS" \
+  --arg dir "$DIR" --argjson base "$BASE_REF" --arg branch "$BRANCH" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" --argjson prompts "$PROMPTS" --argjson roles "$ROLES" \
   '{loop_id: $id, protocol_version: 2, active: true, phase: "coding", round: 1, max_rounds: $mr,
-    backend: $be, model: $model, effort: $effort, base_ref: $base, dir: $dir, root: $root, usage: $usage, prompts: $prompts,
+    backend: $be, model: $model, effort: $effort, base_ref: $base, branch: (if $branch == "" then null else $branch end), dir: $dir, root: $root, usage: $usage, prompts: $prompts, roles: $roles,
     session_id: (if $sid == "" then null else $sid end), started_at: $t, retries: 0, verdict: null, rounds: [],
     round_started_at: $t, round_started_epoch: $e, paused_s: 0, failed_review_s: 0}' > "$LOOP_DIR/state.json"
 
@@ -197,6 +221,7 @@ Review loop started
   task:       $LOOP_DIR/task.md
 
   prompts:    reviewer $(jq -r '.reviewer | if . == "" then "default" else . end' <<< "$PROMPTS") (+ $(jq -r '.reviewer_extra | if . == "" then "no extra" else . end' <<< "$PROMPTS")), coder $(jq -r '.coder | if . == "" then "default" else . end' <<< "$PROMPTS") (+ $(jq -r '.coder_extra | if . == "" then "no extra" else . end' <<< "$PROMPTS"))
+  roles:      reviewer $(jq -r '.reviewer | if length == 0 then "none" else join(",") end' <<< "$ROLES"), coder $(jq -r '.coder | if length == 0 then "none" else join(",") end' <<< "$ROLES")
   brief:      $LOOP_DIR/coder-brief.md
 
 Your brief (follow it; it may carry project-specific instructions):

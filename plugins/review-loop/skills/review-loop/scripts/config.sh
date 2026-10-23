@@ -10,6 +10,7 @@
 #                                                 model / dashboard.out / dashboard.dirs)
 #   config.sh gitignore [--dry-run]               add the loop's paths to .gitignore
 #   config.sh keys [--json]                       list keys with types and descriptions
+#   config.sh roles [--json]                      list the role presets (roles.reviewer / roles.coder)
 #   config.sh models [scope] [--backend NAME] [--json] [--no-save]
 #                         refresh models and efforts; save beside the selected config
 #
@@ -40,24 +41,26 @@
 #   prompts.reviewer_extra  file appended to the reviewer prompt         path
 #   prompts.coder           file replacing the coder brief template      path
 #   prompts.coder_extra     file appended to the coder brief             path
+#   roles.reviewer  role presets focusing the reviewer (see: roles)     comma-separated list
+#   roles.coder     role presets focusing the coder (see: roles)        comma-separated list
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 command -v jq > /dev/null 2>&1 || rl_die "'jq' is required"
 
-KEYS="backend model effort max_rounds dir usage dashboard.dirs dashboard.out dashboard.open dashboard.auto prompts.reviewer prompts.reviewer_extra prompts.coder prompts.coder_extra"
+KEYS="backend model effort max_rounds dir usage dashboard.dirs dashboard.out dashboard.open dashboard.auto prompts.reviewer prompts.reviewer_extra prompts.coder prompts.coder_extra roles.reviewer roles.coder"
 key_type() {
   case "$1" in
     backend|model|effort|dir|dashboard.out|prompts.reviewer|prompts.reviewer_extra|prompts.coder|prompts.coder_extra) echo string ;;
     max_rounds) echo integer ;;
     usage|dashboard.open|dashboard.auto) echo boolean ;;
-    dashboard.dirs) echo list ;;
+    dashboard.dirs|roles.reviewer|roles.coder) echo list ;;
     *) return 1 ;;
   esac
 }
 # Keys that may legitimately be empty; the wizard clears them with "-".
-key_clearable() { case "$1" in model|effort|dashboard.out|dashboard.dirs|prompts.*) return 0 ;; *) return 1 ;; esac; }
+key_clearable() { case "$1" in model|effort|dashboard.out|dashboard.dirs|prompts.*|roles.*) return 0 ;; *) return 1 ;; esac; }
 
 key_help() {
   case "$1" in
@@ -75,6 +78,8 @@ key_help() {
     prompts.reviewer_extra) echo "file appended to the reviewer prompt as project instructions" ;;
     prompts.coder) echo "file that replaces the coder brief template (same {{placeholders}})" ;;
     prompts.coder_extra) echo "file appended to the coder brief as project instructions" ;;
+    roles.reviewer) echo "role presets added to the reviewer prompt, comma-separated (list: config.sh roles)" ;;
+    roles.coder) echo "role presets added to the coder brief, comma-separated (list: config.sh roles)" ;;
   esac
 }
 
@@ -95,7 +100,7 @@ take_name() { # optional NAME after --provider / --provider-file
   [ $# -gt 1 ] || return 1
   local n
   case "$2" in -*|*=*) return 1 ;; esac
-  case "$2" in show|create|set|unset|init|gitignore|keys|models)
+  case "$2" in show|create|set|unset|init|gitignore|keys|models|roles)
     echo "note: '$1' took no provider name because '$2' is a command; use $1=$2 to name a provider so called" >&2; return 1 ;; esac
   if key_type "$2" > /dev/null 2>&1; then
     echo "note: '$1' took no provider name because '$2' is a config key; use $1=$2 to name a provider so called" >&2; return 1
@@ -222,7 +227,14 @@ coerce() {
         *) echo "$key must be true or false (got '$raw')" >&2; return 1 ;;
       esac ;;
     list)
-      jq -n --arg v "$raw" '$v | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))' ;;
+      local list msg
+      list=$(jq -c -n --arg v "$raw" '$v | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))')
+      case "$key" in roles.*)
+        # Preset names are a closed list; a repeated name is kept once.
+        list=$(jq -c 'reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end)' <<< "$list")
+        msg=$(rl_check_role_presets "$key" "$list") || { echo "$msg" >&2; return 1; } ;;
+      esac
+      printf '%s\n' "$list" ;;
   esac
 }
 
@@ -277,10 +289,20 @@ cmd_keys() {
         jq -cn --arg k "$k" --arg t "$(key_type "$k")" --arg h "$(key_help "$k")" \
           --argjson c "$(key_clearable "$k" && echo true || echo false)" '{key: $k, type: $t, help: $h, clearable: $c}'
       done
-    } | jq -s --argjson b "$(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | jq -R . | jq -s .)" '{keys: ., backends: $b}'
+    } | jq -s --argjson b "$(ls "$RL_BACKENDS_DIR" | sed 's/\.sh$//' | grep -v '^fake$' | jq -R . | jq -s .)" \
+      --argjson r "$(rl_role_presets)" '{keys: ., backends: $b, roles: $r}'
     return
   fi
   for k in $KEYS; do printf '  %-16s %-9s %s\n' "$k" "$(key_type "$k")" "$(key_help "$k")"; done
+}
+
+cmd_roles() {
+  local presets
+  presets=$(rl_role_presets)
+  if [ "$JSON" = "1" ]; then printf '%s\n' "$presets"; return; fi
+  echo "role presets (set with: config.sh set roles.reviewer=NAME,... roles.coder=NAME,...; or start.sh --reviewer-roles/--coder-roles):"
+  jq -r '.[] | "  \(.name)\t\(.group)\t\(.title): \(.summary)"' <<< "$presets" | column -t -s "$(printf '\t')" 2>/dev/null \
+    || jq -r '.[] | "  \(.name)  \(.title): \(.summary)"' <<< "$presets"
 }
 
 cmd_models() {
@@ -412,7 +434,7 @@ cmd_unset() {
     key_type "$k" > /dev/null || rl_die "unknown key '$k'"
     NEW=$(jq -c --argjson p "$(tpath "$k")" --argjson s "$SECTION" \
       'delpaths([$p])
-       | (if (getpath($s + ["dashboard"]) == {}) then delpaths([$s + ["dashboard"]]) else . end)
+       | reduce ("dashboard", "prompts", "roles") as $o (.; if getpath($s + [$o]) == {} then delpaths([$s + [$o]]) else . end)
        | (if ($s | length) > 0 and getpath($s) == {} then delpaths([$s]) else . end)
        | (if .providers == {} then del(.providers) else . end)' <<< "$NEW")
   done
@@ -541,6 +563,9 @@ cmd_init() {
               fi
               n=0; while IFS=$'\t' read -r id label; do n=$((n + 1)); printf '      %d) %s%s\n' "$n" "$id" "${label:+ — $label}"; done <<< "$choices"
             fi ;;
+          roles.*)
+            echo "    available (type names separated by commas):"
+            jq -r '.[] | "      \(.name) — \(.title): \(.summary)"' <<< "$(rl_role_presets)" ;;
         esac
         printf '    [%s]: ' "$cur"
         IFS= read -r raw < /dev/stdin || raw=""
@@ -596,6 +621,7 @@ case "$CMD" in
   gitignore) no_args; cmd_gitignore ;;
   keys) no_args; cmd_keys ;;
   models) no_args; cmd_models ;;
+  roles) no_args; cmd_roles ;;
   ""|-h|--help|help) usage ;;
-  *) rl_die "unknown command '$CMD' (show|create|set|unset|init|gitignore|keys|models)" ;;
+  *) rl_die "unknown command '$CMD' (show|create|set|unset|init|gitignore|keys|models|roles)" ;;
 esac

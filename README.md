@@ -132,6 +132,44 @@ bash $CFG set prompts.reviewer_extra=docs/review-guidelines.md prompts.coder_ext
 
 A replacement reviewer template must still end with the required output format (`{{REVIEW_FORMAT}}`) so verdicts stay machine-parseable; if a replacement template has no `{{EXTRA}}`, configured extras are appended at the end anyway. Paths are frozen into `state.json` when the loop starts and the files are read at each use, so edits apply to the next round: the reviewer prompt is built each round, and `coder-brief.md` is re-rendered whenever `review.sh` advances to a new round (its output tells the coder to re-read it). A missing or unreadable file stops `start.sh` (before it creates or cancels anything) or `review.sh` with a message naming the key. For the reviewer's files that happens before the reviewer runs; the coder's files are only needed when a new round starts, so a missing one never blocks an approval or the final round: `review.sh` keeps the review on disk and leaves the round where it is; the coder fixes the file and runs it again, and that run resumes from the installed review (verdict and comments unchanged) without calling the reviewer a second time.
 
+### Role presets: focus an agent on a speciality
+
+`templates/roles/` ships ready-made role presets, short focus instructions
+adapted (MIT) from the Core Engineering and Development Tools skills of
+[alirezarezvani/claude-skills](https://github.com/alirezarezvani/claude-skills/tree/main/engineering-team):
+
+| Group | Presets |
+|---|---|
+| Core Engineering | `senior-architect`, `senior-frontend`, `senior-backend`, `senior-fullstack`, `senior-qa`, `senior-devops`, `senior-secops`, `code-reviewer`, `senior-security` |
+| Development Tools | `tdd-guide`, `tech-stack-evaluator` |
+
+Each one works for either agent: the coder builds to the standards and the
+reviewer checks them. Pick any number per role with `roles.reviewer` and
+`roles.coder` (comma-separated names), or per run with `--reviewer-roles` /
+`--coder-roles` (an empty value means none, even when the config sets some).
+
+The defaults are stack-neutral so they fit any project: the reviewer runs with
+`code-reviewer` and `senior-security` (a general review checklist plus a quick
+threat model of the change) and the coder with `senior-qa` (meaningful,
+reliable tests on the risky paths). Set a key to an empty list
+(`roles.coder=`) to turn its defaults off, or `unset` it to get them back.
+
+```bash
+bash $CFG roles                                   # list the presets
+bash $CFG set roles.reviewer=code-reviewer,senior-security roles.coder=senior-backend,tdd-guide
+/review-loop add the export endpoint --reviewer-roles senior-secops   # per run
+```
+
+Each preset is rendered into `{{EXTRA}}` as a "Role focus: <title>" section,
+before any `prompts.*_extra` file, so it also reaches a replacement template
+(appended when the template has no `{{EXTRA}}`). The names are validated by
+`config.sh` and `start.sh` and frozen into `state.json` (`roles`) when the loop
+starts; the dashboard's configuration page offers them as checkboxes on each
+role card, saved automatically on every change like the other settings (on a
+`--serve` page right away; on a static page once auto-save is enabled for the
+config file). To add your own preset, drop a `<name>.md` file with `title`,
+`summary`, `group` and `source` front matter into `templates/roles/`.
+
 ### Verdict rules
 
 New loops freeze `protocol_version: 2` in state. They validate unique consecutive
@@ -181,7 +219,7 @@ Backends report usage through an optional sidecar file (see "Reviewer backends")
 
 ```
 /review-dashboard
-bash plugins/review-loop/skills/review-loop/scripts/dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open] [--serve [--port N]]
+bash plugins/review-loop/skills/review-loop/scripts/dashboard.sh [--dir DIR]... [--out FILE] [--open|--no-open] [--serve [--port N]] [--share]
 ```
 
 Generates a self-contained `dashboard.html` (default: inside the storage dir) from every loop folder it finds and opens it in your browser. The page has four views, each with its own link: the main page (`#/`) with the stat tiles, the charts and the list of loops; a "Start a loop" page (`#/start`, header button); a loop page (`#/loop/<loop-id>`) opened by clicking a row, showing only that loop's rounds, comments and summary; and the configuration page (`#/config`), reached from the header button. With no arguments everything comes from the config files, so a bare `/review-dashboard` is enough:
@@ -220,7 +258,14 @@ The Configuration page (header button, or `#/config`) shows every setting with i
 
 - **Static page** (the default): the panel shows the exact `config.sh` command for your changes (copy it), or saves the file through the browser. In Chromium browsers the file picker re-reads the chosen file and merges your changes into it without touching anything else (number literals included); elsewhere only a new file can be downloaded, and existing files are edited through the command. Use **Enable auto-save…** to choose the configuration file once; subsequent valid edits save automatically, merging into its current contents each time. Browsers without file access retain the download and command options.
 - **Sharing**: a static page carries only project-level configuration. Your user files (`~/.config/review-loop/config.json`, `~/.<provider>/review-loop.json`) are listed without contents, effective values from those files or environment overrides are hidden, and so are the backends' default model and effort (they come from your own tool configuration, e.g. `~/.codex/config.toml`; the model lists themselves stay), so the page can be committed or published; pass `--with-user-config` to embed them in a page you keep private.
-- **Starting a loop from the page**: the "Start a loop" page (header button, or `#/start`) takes the task and the backend, model, effort, max rounds and usage (prefilled from the configuration; model and effort offered from the backend's catalog). Only what differs from the configuration is passed to `start.sh` (choosing "backend default" for a configured model or effort is passed as an explicit empty flag, which overrides the configuration). On a served page the Start button creates the loop through `start.sh` (`/api/start`, validated fields, the task passed after `--`, no shell) and then says what comes next — open Claude Code in the project and send any message; the Stop hook holds that session to the task until the reviewer approves — before opening the new loop's page. A static page shows the equivalent `start.sh` command to copy. An active loop of this project must be cancelled first, as on the command line (another project's loop in a shared storage dir does not block it).
+- **Sending a review to someone else**: `dashboard.sh --share --out review.html` writes a read-only page for a teammate.
+  - **Removed:** the Start and Configuration pages, the configuration itself, absolute paths (the project is named by its folder, and loop folders are project-relative), session ids and transcript paths.
+  - **Kept:** the record: tasks, rounds, comments, verdicts and usage.
+  - **Added:** each loop page opens with a short primer on how to read the exchange.
+  - **Not allowed:** `--share` cannot be combined with `--serve` or `--with-user-config`.
+  - **Paths in the agents' text:** in the round files and the summary, the project root becomes relative and your home directory `~`; everything else is embedded as written.
+- **Where values come from**: the Configuration page starts simple, showing each value, its help line and the role presets. **Show where values come from** reveals the precedence detail: the source of each value, what this file holds, the per-field write and unset buttons, and the **Save to** file picker. The choice is remembered in that browser, and the detail always shows when the page targets a file other than the project shared one. Masking warnings appear after every save either way.
+- **Starting a loop from the page**: the "Start a loop" page (header button, or `#/start`) takes the task and the backend, model, effort, max rounds and usage (prefilled from the configuration; model and effort offered from the backend's catalog). Only what differs from the configuration is passed to `start.sh` (choosing "backend default" for a configured model or effort is passed as an explicit empty flag, which overrides the configuration). On a served page the Start button creates the loop through `start.sh` (`/api/start`, validated fields, the task passed after `--`, no shell) and then says what comes next — open Claude Code in the project and send any message; the Stop hook holds that session to the task until the reviewer approves — before opening the new loop's page. A static page gives the same request as a `/review-loop …` line to paste into Claude Code in the project (its main action, **Copy for Claude Code**), with the equivalent `start.sh` command under "Or run it in a terminal". An active loop of this project must be cancelled first, as on the command line (another project's loop in a shared storage dir does not block it).
 - **Served page**: `dashboard.sh --serve [--port 8765]` (needs `python3`) serves the dashboard on `127.0.0.1` only and automatically saves valid configuration edits through `config.sh`, so validation, masking warnings and provider rules apply. Saves are debounced and serialized, show saving/saved/error status, and preserve newer edits without reloading the page; **Save now / retry** retries a failed save. Requests (`/api/config`, `/api/start`, `/api/models`) must carry the per-run token embedded in the page, keys, provider and backend names are validated before anything runs, and no shell is involved. The served page (token and user configuration included) lives in a private temp file that is deleted when the server stops; the configured output file keeps the redacted, shareable page. The server runs until Ctrl-C. Flags override the config; `REVIEW_LOOP_DASHBOARD_OPEN=0` and `REVIEW_LOOP_DASHBOARD_OUT` override it from the environment. No server, no network: the loop data is embedded in the page. The main page shows stat tiles (loops, approval rate, average rounds, tokens and cost when usage tracking is on), a rounds-per-loop chart with the cap marked, time and output-token charts split by coder and reviewer, and a filterable table. A loop's page shows its full comment trail round by round: coder summary beside the review, verdict, blocking count, usage, and the final summary. It follows the system light/dark setting and has a theme toggle.
 
 The local request and response contract is documented in [Dashboard API](docs/dashboard-api.md).
@@ -276,6 +321,7 @@ With `dir` set to the project root (`.`), `gitignore` writes a pattern matching 
 | Storage dir | `--dir` | `REVIEW_LOOP_DIR` | `dir` | `.review-loop` |
 | Usage tracking | `--usage` / `--no-usage` | `REVIEW_LOOP_USAGE` | `usage` | `false` |
 | Role prompts | `--reviewer-prompt` / `--reviewer-extra` / `--coder-prompt` / `--coder-extra` | | `prompts.{reviewer,reviewer_extra,coder,coder_extra}` | templates in `templates/` |
+| Role presets | `--reviewer-roles` / `--coder-roles` | | `roles.{reviewer,coder}` | reviewer `code-reviewer,senior-security`, coder `senior-qa` (list: `config.sh roles`) |
 | Dashboard | `--dir` / `--out` / `--open` | `REVIEW_LOOP_DASHBOARD_OPEN`, `REVIEW_LOOP_DASHBOARD_OUT` | `dashboard.{dirs,out,open,auto}` | loop dir, `<dir>/dashboard.html`, `true`, `false` |
 
 Example `~/.config/review-loop/config.json`:
