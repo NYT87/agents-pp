@@ -59,19 +59,27 @@ effective value in each question** and offering it as the first option:
 | `dashboard.open` | open the dashboard in the browser after `/review-dashboard` | yes / no |
 | `dashboard.auto` | regenerate the dashboard automatically when a loop ends | yes / no |
 | `dashboard.out` | dashboard output file | keep current / default (`<dir>/dashboard.html`) / a path |
+| `roles.reviewer` | role presets that focus the reviewer | keep current / default (`code-reviewer`, `senior-qa`, `senior-security`) / none / any names from the full preset list (shown first, see below) |
+| `roles.coder` | role presets that focus the coder | keep current / default (`senior-architect`, `tech-stack-evaluator`, `senior-security`, `senior-backend`, `senior-secops`) / none / any names from the full preset list (shown first, see below) |
 
-| `roles.reviewer` | role presets that focus the reviewer | keep current / default (`code-reviewer`, `senior-security`) / none / pick any of the presets (see below) |
-| `roles.coder` | role presets that focus the coder | keep current / default (`senior-qa`) / none / pick any of the presets |
-
-For the two `roles.*` keys, list the presets and let the user pick several
-(multi-select, by title, with the summary as the description); write the
-chosen names comma-separated, e.g. `roles.reviewer=code-reviewer,senior-security`,
-an empty value (`roles.coder=`) for none, and `unset` the key to go back to the
-default (`defaults.roles` in the `show --json` output):
+For the two `roles.*` keys, first load every preset:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/../review-loop/scripts/config.sh roles --json
 ```
+
+There are more presets than a question can offer as options, so never let
+the question's options stand in for the list. Before asking, print the
+**whole** list in your message, every preset the command returns, as one
+table with a column for each role: name, title, summary, and whether it is
+the reviewer's current preset and the coder's current preset (from the
+effective `roles.reviewer` / `roles.coder`). Then ask once per role with the
+options keep current / default / none, and let the user type any names from
+the table (comma-separated) through the free-text answer. Write the chosen
+names comma-separated, e.g. `roles.reviewer=code-reviewer,senior-security`,
+an empty value (`roles.coder=`) for none, and `unset` the key to go back to
+the default (`defaults.roles` in the `show --json` output). Reject a typed
+name that is not in the table and ask again.
 
 Skip `dashboard.dirs` unless the user mentions several storage folders; then
 ask for a comma-separated list.

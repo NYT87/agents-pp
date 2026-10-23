@@ -2340,14 +2340,14 @@ assert_eq "roles: every Core Engineering and Development Tools preset ships" \
 assert_eq "roles: each preset has a title, summary, group and source" "0" \
   "$(jq '[.[] | select(.title == .name or .summary == "" or (.group | IN("core", "tools") | not) or (.source | startswith("https://github.com/alirezarezvani/claude-skills/") | not))] | length' <<< "$J")"
 assert_contains "roles: text listing names a preset" "senior-backend" "$(bash "$C" roles)"
-# defaults: stack-neutral presets for every role when nothing is configured
+# defaults: the built-in presets for every role when nothing is configured
 J=$(cd "$R" && bash "$C" show --json)
-assert_eq "default reviewer presets" '["code-reviewer","senior-security"]' "$(jq -c .defaults.roles.reviewer <<< "$J")"
-assert_eq "default coder presets" '["senior-qa"]' "$(jq -c .defaults.roles.coder <<< "$J")"
+assert_eq "default reviewer presets" '["code-reviewer","senior-qa","senior-security"]' "$(jq -c .defaults.roles.reviewer <<< "$J")"
+assert_eq "default coder presets" '["senior-architect","tech-stack-evaluator","senior-security","senior-backend","senior-secops"]' "$(jq -c .defaults.roles.coder <<< "$J")"
 assert_eq "defaults are what applies with no config" "default" "$(jq -r '.sources["roles.coder"]' <<< "$J")"
 start "$R" "defaults" > /dev/null; L=$(pointer "$R")
-assert_eq "a loop with no config freezes the default presets" '{"reviewer":["code-reviewer","senior-security"],"coder":["senior-qa"]}' "$(jq -c .roles "$L/state.json")"
-assert_contains "the default coder preset reaches the brief" "## Role focus: Senior QA Engineer (preset senior-qa)" "$(cat "$L/coder-brief.md")"
+assert_eq "a loop with no config freezes the default presets" '{"reviewer":["code-reviewer","senior-qa","senior-security"],"coder":["senior-architect","tech-stack-evaluator","senior-security","senior-backend","senior-secops"]}' "$(jq -c .roles "$L/state.json")"
+assert_contains "the default coder presets reach the brief" "## Role focus: Senior Software Architect (preset senior-architect)" "$(cat "$L/coder-brief.md")"
 echo d > "$R/d"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
 assert_contains "the default reviewer presets reach the prompt" "## Role focus: Senior Security Engineer (preset senior-security)" "$(cat "$L/round-01-prompt.md")"
 # an empty configured list turns the defaults off; unset brings them back
@@ -2357,7 +2357,7 @@ assert_eq "an empty list resolves to none" '[]' "$(cd "$R" && bash "$C" show --j
 start "$R" "no coder presets" > /dev/null; L=$(pointer "$R")
 assert_not_contains "no coder preset once cleared" "Role focus" "$(cat "$L/coder-brief.md")"
 (cd "$R" && bash "$S/cancel.sh" > /dev/null; bash "$C" unset roles.coder > /dev/null); rm -f "$R/.review-loop.json"
-assert_eq "unset restores the default" '["senior-qa"]' "$(cd "$R" && bash "$C" show --json | jq -c .effective.roles.coder)"
+assert_eq "unset restores the default" '["senior-architect","tech-stack-evaluator","senior-security","senior-backend","senior-secops"]' "$(cd "$R" && bash "$C" show --json | jq -c .effective.roles.coder)"
 assert_eq "keys --json carries the presets" "11" "$(bash "$C" keys --json | jq '.roles | length')"
 OUT=$(cd "$R" && bash "$C" set roles.coder=senior-backend,nope 2>&1); RC=$?
 assert_eq "set: an unknown preset fails" "1" "$RC"

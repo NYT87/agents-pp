@@ -148,10 +148,11 @@ reviewer checks them. Pick any number per role with `roles.reviewer` and
 `roles.coder` (comma-separated names), or per run with `--reviewer-roles` /
 `--coder-roles` (an empty value means none, even when the config sets some).
 
-The defaults are stack-neutral so they fit any project: the reviewer runs with
-`code-reviewer` and `senior-security` (a general review checklist plus a quick
-threat model of the change) and the coder with `senior-qa` (meaningful,
-reliable tests on the risky paths). Set a key to an empty list
+By default the reviewer runs with `code-reviewer`, `senior-qa` and
+`senior-security` (a general review checklist, test coverage of the risky paths,
+and a quick threat model of the change), and the coder with `senior-architect`,
+`tech-stack-evaluator`, `senior-security`, `senior-backend` and `senior-secops`
+(design trade-offs, justified dependencies, secure backend code). Set a key to an empty list
 (`roles.coder=`) to turn its defaults off, or `unset` it to get them back.
 
 ```bash
@@ -321,7 +322,7 @@ With `dir` set to the project root (`.`), `gitignore` writes a pattern matching 
 | Storage dir | `--dir` | `REVIEW_LOOP_DIR` | `dir` | `.review-loop` |
 | Usage tracking | `--usage` / `--no-usage` | `REVIEW_LOOP_USAGE` | `usage` | `false` |
 | Role prompts | `--reviewer-prompt` / `--reviewer-extra` / `--coder-prompt` / `--coder-extra` | | `prompts.{reviewer,reviewer_extra,coder,coder_extra}` | templates in `templates/` |
-| Role presets | `--reviewer-roles` / `--coder-roles` | | `roles.{reviewer,coder}` | reviewer `code-reviewer,senior-security`, coder `senior-qa` (list: `config.sh roles`) |
+| Role presets | `--reviewer-roles` / `--coder-roles` | | `roles.{reviewer,coder}` | reviewer `code-reviewer,senior-qa,senior-security`, coder `senior-architect,tech-stack-evaluator,senior-security,senior-backend,senior-secops` (list: `config.sh roles`) |
 | Dashboard | `--dir` / `--out` / `--open` | `REVIEW_LOOP_DASHBOARD_OPEN`, `REVIEW_LOOP_DASHBOARD_OUT` | `dashboard.{dirs,out,open,auto}` | loop dir, `<dir>/dashboard.html`, `true`, `false` |
 
 Example `~/.config/review-loop/config.json`:

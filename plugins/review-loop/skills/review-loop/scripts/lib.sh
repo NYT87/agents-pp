@@ -233,7 +233,7 @@ rl_config_files() {
 # (for a shared file: its top-level keys, then its providers.<provider>
 # section), REVIEW_LOOP_* env. Flags are applied by start.sh.
 rl_resolve_config() {
-  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","effort":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false},"prompts":{"reviewer":"","reviewer_extra":"","coder":"","coder_extra":""},"roles":{"reviewer":["code-reviewer","senior-security"],"coder":["senior-qa"]}}'
+  local defaults='{"dir":".review-loop","max_rounds":5,"backend":"codex","model":"","effort":"","usage":false,"dashboard":{"dirs":[],"out":"","open":true,"auto":false},"prompts":{"reviewer":"","reviewer_extra":"","coder":"","coder_extra":""},"roles":{"reviewer":["code-reviewer","senior-qa","senior-security"],"coder":["senior-architect","tech-stack-evaluator","senior-security","senior-backend","senior-secops"]}}'
   local cfg="$defaults" env_cfg label path kind file_cfg p merged
   p=$(rl_provider)
   while IFS=$'\t' read -r label path kind; do
