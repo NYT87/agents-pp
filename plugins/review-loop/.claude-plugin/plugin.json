@@ -1,6 +1,6 @@
 {
   "name": "review-loop",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Coder/reviewer loop: Claude implements a task, an independent CLI reviewer (Codex, Claude, ...) reviews it, and the loop repeats until the reviewer approves. Every round's comments are stored on disk.",
   "author": {
     "name": "Jose Miguel Navarro"
