@@ -48,7 +48,7 @@ assert.match(html, /<span class="pick-sum">\$\{esc\(p\.summary\)\}<\/span>/, 'pr
 assert.match(html, /<div class="help" id="cfg-h-\$\{k\.key\}">/, 'field help lines use the hint style');
 assert.match(html, /\.cfg-row \.help, \.catalog-status \{ color: var\(--muted\); font-size: 12px; \}/, 'hints and catalog status lines are 12px');
 assert.doesNotMatch(html, /chip neutral"><i><\/i>\$\{r\.blocking\} blocking/, 'the blocking count is not a chip');
-assert.match(html, /<div class="round-head"><h3>Round \$\{f\.round\} [^\n]*<\/h3>\n\s*\$\{meta && !SHARE \? `<span class="round-meta">/, 'round counts sit outside the heading (and are left out of a shared page)');
+assert.match(html, /<details class="round" id="round-\$\{f\.round\}">\n\s*<summary class="round-head"><h3>Round \$\{f\.round\} [^\n]*<\/h3>\n\s*\$\{meta && !SHARE \? `<span class="round-meta">/, 'round counts sit outside the heading (and are left out of a shared page)');
 assert.match(html, /<details class="usage"><summary>Token usage/, 'per-round usage is behind a disclosure');
 assert.match(html, /'dashboard\.dirs': 'e\.g\. \.review-loop,archive'/, 'list placeholders are examples');
 assert.doesNotMatch(html, /placeholder="\$\{k\.type === 'list' \? 'comma-separated'/, 'no hint dressed as a placeholder');
@@ -125,9 +125,9 @@ assert.match(table, /<th scope="row">Oct 2<\/th><td>0<\/td><td><\/td>/, 'a missi
 assert.match(RL.chartTable('Rounds', [{ label: 'a', segments: [{ value: 2 }] }]), /<th scope="col">value<\/th>[\s\S]*<td>2<\/td>/);
 
 // Markdown inside a round (h3) starts at h4, capped at h6; the class keeps the size.
-const mdScope = { esc };
+const mdScope = { esc, DATA: { root: '/home/me/proj' } };
 vm.createContext(mdScope);
-vm.runInContext(slice('  function md(', '  // ── render'), mdScope);
+vm.runInContext(slice('  function mdLink(', '  // ── render'), mdScope);
 const rendered = mdScope.md('# Round 1 — coder summary\n\n## What I did\n\n#### Detail\n\ntext');
 assert.match(rendered, /<h4 class="md-h1">Round 1 — coder summary<\/h4>/);
 assert.match(rendered, /<h5 class="md-h2">What I did<\/h5>/);
@@ -141,6 +141,24 @@ assert.equal(mdScope.md('`<b>` R1-C2'), '<p><code>&lt;b&gt;</code> <span class="
 assert.equal(mdScope.md('a ` b'), '<p>a ` b</p>', 'an unmatched backtick stays literal');
 // A list item continues on indented lines that do not start a new item.
 assert.equal(mdScope.md('- one `x\n  y` two\n- three\n1. first\n   more'), '<ul><li>one <code>x y</code> two</li><li>three</li></ul><ol><li>first more</li></ol>');
+// Links: a file path shows as name:line with its project-relative path on
+// hover (never a link to the sender's disk); a web URL stays a link.
+assert.equal(mdScope.md('see [a.js](/home/me/proj/src/a.js:12)'), '<p>see <span class="file-ref" title="src/a.js:12">a.js:12</span></p>');
+assert.equal(mdScope.md('[`b.py` line 3](src/b.py#L3)'), '<p><span class="file-ref" title="src/b.py#L3"><code>b.py</code> line 3:3</span></p>');
+assert.equal(mdScope.md('[c.sh:7](/elsewhere/c.sh:7)'), '<p><span class="file-ref" title="/elsewhere/c.sh:7">c.sh:7</span></p>', 'a label that has the line keeps it once');
+assert.equal(mdScope.md('[docs](https://example.com/x?a=1&b=2)'), '<p><a href="https://example.com/x?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">docs</a></p>');
+assert.equal(mdScope.md('[x](javascript:alert(1))'), '<p><span class="file-ref" title="javascript:alert(1">x</span>)</p>', 'only http(s) targets become links');
+// Emphasis: *word* is emphasis; a lone asterisk or a product stays literal.
+assert.equal(mdScope.md('a *listed* model, 2 * 3 * 4, **bold**'), '<p>a <em>listed</em> model, 2 * 3 * 4, <b>bold</b></p>');
+// The start page's line for Claude Code: the same flags as start.sh, the task
+// quoted for the shell, "--" only before a task that starts with a dash.
+const eff = { backend: 'codex', model: '', effort: '', max_rounds: 5, usage: false };
+assert.equal(RL.slashCommand({ task: ' add divide() ', backend: 'codex', model: '', effort: '', max_rounds: '5', usage: false }, eff), "/review-loop 'add divide()'");
+assert.equal(RL.slashCommand({ task: "it's -x", backend: 'claude', model: 'opus', effort: 'high', max_rounds: '3', usage: true }, eff), "/review-loop --backend claude --model opus --effort high --max-rounds 3 --usage 'it'\\''s -x'");
+assert.equal(RL.slashCommand({ task: '--flag-like task' }, eff), "/review-loop -- '--flag-like task'");
+assert.equal(RL.slashCommand({ task: '  ' }, eff), '');
+assert.match(html, /\$\('#start-cmd'\)\.textContent = problem \|\| RL\.slashCommand\(st, eff\);/, 'the main start output is the Claude Code line');
+assert.match(html, /if \(!DATA\.serve && \$\('#start-copy'\)\.classList\) \$\('#start-copy'\)\.classList\.toggle\('primary', ok\);/, 'on a static page copying is the main action');
 // Document panes are named regions; ones that scroll get a tab stop.
 for (const who of ['coder', 'reviewer']) assert.ok(html.includes(`<div class="doc ${who}" role="region" aria-label="Round \${f.round} ${who}">`), `${who} pane is a named region`);
 assert.match(html, /role="region" aria-label="Loop summary"/);

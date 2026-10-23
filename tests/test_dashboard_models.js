@@ -65,7 +65,7 @@ function setup(served) {
   assert.match(ctx.catalogSelect('effort', '', {}, '', 'data-start="effort"', false), /^<select /);
   assert.match(ctx.catalogSelect('model', '<script>', {}, '', 'data-key="model"', true), /&lt;script&gt;/);
   assert.match(ctx.catalogSelect('model', '', {}, '', 'data-key="model"', true), / disabled>/);
-  assert.match(ctx.catalogActions('cfg-model', 'codex'), /Refresh available options/);
+  assert.match(ctx.catalogActions('cfg-model', 'codex'), />Refresh models</);
   assert.match(ctx.catalogActions('cfg-model', ''), /disabled/);
   ctx.bindCatalogActions('cfg-model', 'codex');
   await $('#cfg-model-refresh').onclick();
@@ -92,8 +92,8 @@ function setup(served) {
   assert.equal($('#cfg-model-refresh').disabled, false);
 
   const offline = setup(false);
-  assert.match(offline.ctx.catalogActions('start-model', 'codex'), /Load model catalog/);
-  assert.match(offline.ctx.catalogActions('start-model', 'codex'), /Copy catalog command/);
+  assert.match(offline.ctx.catalogActions('start-model', 'codex'), />Load models…</);
+  assert.match(offline.ctx.catalogActions('start-model', 'codex'), />Copy list command</);
   offline.ctx.bindCatalogActions('start-model', 'codex');
   await offline.$('#start-model-refresh').onclick();
   assert.equal(offline.$('#start-model-file').clicks, 1);

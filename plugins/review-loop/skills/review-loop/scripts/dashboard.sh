@@ -177,14 +177,25 @@ jq -s -c --arg root "$ROOT" --arg t "$(rl_now)" --arg script "$RL_SCRIPTS_DIR/co
 if [ "$SHARE" = "1" ]; then
   # A shared page keeps the record (tasks, rounds, verdicts, usage) and drops
   # everything about the sender's machine: configuration, absolute paths,
-  # session and transcript data. Loop folders become project-relative.
-  jq -c --arg root "$ROOT" '
+  # session and transcript data. Loop folders become project-relative, and so
+  # does every path the agents wrote into their files (the project root
+  # becomes relative, the home directory "~").
+  jq -c --arg root "$ROOT" --arg home "${HOME:-}" '
     def rel: if startswith($root + "/") then .[($root | length) + 1:] else (split("/") | last) end;
-    .share = true | .project = ($root | split("/") | last) | .root = .project
+    ($root | split("/") | last) as $project
+    # A path inside the root or home ("root/", "home/") is cut at the slash; the
+    # root or home on its own is replaced only where the path name ends, so
+    # /Users/alice becomes "~" but /Users/alicebob is left alone.
+    | def esc_re: gsub("(?<c>[\\\\.^$|?*+()\\[\\]{}])"; "\\\(.c)");
+      def bare($p; $to): gsub(($p | esc_re) + "(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_-])"; $to);
+      def scrub: if type == "string" then split($root + "/") | join("") | bare($root; $project)
+        | (if $home != "" and $home != "/" then split($home + "/") | join("~/") | bare($home; "~") else . end) else . end;
+    .share = true | .project = $project | .root = .project
     | .config = {show: null, keys: [], backends: [], roles: [], models: {}, provider_files: []}
     | .loops |= map(.dir |= rel
         | .state |= (del(.root, .session_id, .transcript_path, .sessions, .coder_usage_base, .coder_usage_cum, .coder_usage_carry)
-            | if (.prompts | type) == "object" then .prompts |= map_values(if type == "string" and . != "" then split("/") | last else . end) else . end))' \
+            | if (.prompts | type) == "object" then .prompts |= map_values(if type == "string" and . != "" then split("/") | last else . end) else . end)
+        | walk(scrub))' \
     "$WORK/data-full.json" > "$WORK/data-share.json" && mv "$WORK/data-share.json" "$WORK/data-full.json"
 fi
 sed 's|</|<\\/|g' "$WORK/data-full.json" > "$WORK/data.json"

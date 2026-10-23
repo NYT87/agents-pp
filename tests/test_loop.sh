@@ -457,6 +457,7 @@ section "git edge cases"
 R="$TMP/unborn"; mkdir -p "$R" && git -C "$R" init -q
 start "$R" "task" > /dev/null; L=$(pointer "$R")
 assert_eq "unborn HEAD uses empty tree" "4b825dc642cb6eb9a060e54bf8d69288fbee4904" "$(st "$L" base_ref)"
+assert_eq "unborn HEAD still records its branch" "$(git -C "$R" symbolic-ref --short HEAD)" "$(st "$L" branch)"
 assert_contains "unborn: no changes detected" "no changes" "$(reason "$(hook "$R" s1)")"
 echo x > "$R/new.txt"
 assert_contains "unborn: untracked file counts" "round-01-coder.md" "$(reason "$(hook "$R" s1)")"
@@ -2466,17 +2467,24 @@ R=$(new_repo share); rm -rf "$HOME/.config/review-loop"
 (cd "$R" && bash "$C" set max_rounds=4 prompts.coder_extra=docs/coder.md > /dev/null 2>&1); mkdir -p "$R/docs"; echo "Be brief." > "$R/docs/coder.md"
 start "$R" --usage --session abcdefgh1234 "share this task" > /dev/null; L=$(pointer "$R")
 echo s > "$R/s"; coder "$L" 1; verdicts approved; review "$R" > /dev/null
+# Agents write absolute paths into their files: the shared page rewrites them.
+printf '\nSee [s](%s/s:3) and %s/.notes/x.md, home is %s, root is %s, not %sbob\n' "$R" "$HOME" "$HOME" "$R" "$HOME" >> "$L/round-01-coder.md"
 (cd "$R" && bash "$S/dashboard.sh" --share --out shared.html > /dev/null)
 P="$R/shared.html"
 D=$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$P")
 assert_eq "share: the page is marked shared" "true" "$(jq .share <<< "$D")"
 assert_eq "share: the project is named, not located" "$(basename "$R")" "$(jq -r .root <<< "$D")"
 assert_eq "share: no absolute project path anywhere in the page" "0" "$(grep -c -F "$R" "$P")"
+assert_eq "share: no home directory path in the page" "0" "$(grep -c -F "$HOME/" "$P")"
+assert_contains "share: a bare home or root path is rewritten, a neighbouring name is not" "home is ~, root is $(basename "$R"), not ${HOME}bob" "$(jq -r '.loops[0].files[0].coder' <<< "$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$P")")"
+assert_contains "share: paths in the agents' files become project-relative" "See [s](s:3) and ~/.notes/x.md" "$(jq -r '.loops[0].files[0].coder' <<< "$(sed -n 's|.*<script id="rl-data" type="application/json">\(.*\)</script>|\1|p' "$P")")"
 assert_eq "share: loop folders are project-relative" ".review-loop/$(basename "$L")" "$(jq -r '.loops[0].dir' <<< "$D")"
 assert_eq "share: no root, session or transcript in the state" "null null null" "$(jq -r '.loops[0].state | "\(.root) \(.session_id) \(.transcript_path)"' <<< "$D")"
 assert_eq "share: prompt files keep only their names" "coder.md" "$(jq -r '.loops[0].state.prompts.coder_extra' <<< "$D")"
 assert_eq "share: no configuration is embedded" "null 0" "$(jq -r '"\(.config.show) \(.config.keys | length)"' <<< "$D")"
 assert_eq "share: the record stays (rounds, verdict, usage)" "1 approved true" "$(jq -r '.loops[0] | "\(.files | length) \(.state.outcome) \(.state.usage)"' <<< "$D")"
+assert_eq "start records the branch the loop runs on" "$(git -C "$R" symbolic-ref --short HEAD)" "$(st "$L" branch)"
+assert_eq "share: the branch and base commit stay on the shared page" "$(git -C "$R" symbolic-ref --short HEAD) 40" "$(jq -r '.loops[0].state | "\(.branch) \(.base_ref | length)"' <<< "$D")"
 assert_eq "share: the session id is not in the page" "0" "$(grep -c abcdefgh1234 "$P")"
 OUT=$(cd "$R" && bash "$S/dashboard.sh" --share --serve 2>&1); RC=$?
 assert_eq "share: --serve is refused" "1" "$RC"

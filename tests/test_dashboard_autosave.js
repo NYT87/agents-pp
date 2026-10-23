@@ -129,6 +129,7 @@ function setup(served) {
   // alongside auto-save; editing another provider must never change what the
   // server inherits, and a previously opened form must refresh its preview.
   const launch = setup(true), lc = launch.ctx;
+  lc.esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   lc.CFG.keys = [{ key: 'max_rounds', type: 'integer' }];
   const original = { backend: 'codex', model: '', effort: '', max_rounds: 5, usage: false };
   lc.launchEffective = { ...original };

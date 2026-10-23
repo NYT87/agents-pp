@@ -93,7 +93,8 @@
   .reader .share-hide { display: none; }
   .when-small { display: none; font-size: 12px; color: var(--muted); }
   #loops tbody tr[data-id] { cursor: pointer; }
-  .task { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* a loop's name wraps to two lines before it is cut */
+  .task { max-width: 420px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
   .task a { color: inherit; text-decoration: none; } .task a:hover, .task a:focus-visible { text-decoration: underline; }
   .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
   .chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
@@ -110,17 +111,30 @@
   .kv b { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
   .round { border-top: 1px solid var(--grid); padding-top: 12px; margin-top: 12px; }
   .round h3 { font-size: 14px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .round-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 8px; } .round-head h3 { margin: 0; }
+  .round-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; } .round-head h3 { margin: 0; }
+  /* a folded round: its summary is the heading row, led by a small CSS caret that turns when open */
+  summary.round-head { cursor: pointer; list-style: none; padding: 2px 0; } summary.round-head::-webkit-details-marker { display: none; }
+  summary.round-head::before { content: ""; flex: none; width: 0; height: 0; border-left: 6px solid var(--ink-2); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+  .round[open] > summary.round-head { margin-bottom: 8px; } .round[open] > summary.round-head::before { transform: rotate(90deg); }
+  summary.round-head:hover h3 { text-decoration: underline; text-underline-offset: 3px; }
   .round-meta { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
   details.usage { font-size: 12px; color: var(--ink-2); margin-top: 8px; } details.usage .usage-table { margin-top: 6px; }
   .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px; align-items: start; }
-  .doc { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; overflow: auto; max-height: 520px; }
+  .doc { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; overflow: auto; }
   .doc .who { font-size: 11px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; display: flex; align-items: center; gap: 6px; }
   .doc .rv-h { font-size: 13px; margin: 12px 0 4px; } .doc .rv-h:first-of-type { margin-top: 4px; }
-  .doc .rc { padding: 6px 0; border-top: 1px solid var(--grid); } .doc .rc:focus { outline: none; }
+  .doc .rc { padding: 6px 0; border-top: 1px solid var(--grid); } .doc .rc:focus:not(.cid-target) { outline: none; }
+  .doc .rc.cid-target { background: var(--hover); border-radius: 4px; }
+  .doc .rc .to-ledger { font-size: 12px; color: var(--ink-2); margin-left: 6px; }
   .doc .rc-head .meta, .doc .meta { color: var(--ink-2); font-size: 12px; } .doc .rc .fix { color: var(--ink-2); font-size: 12px; }
   .doc ul.grades, .doc ul.answers { list-style: none; padding: 0; margin: 4px 0; } .doc ul.grades li, .doc ul.answers li { margin: 4px 0; }
   .doc .then { color: var(--muted); font-size: 12px; }
+  .doc ul.strip { list-style: none; padding: 0; margin: 4px 0 6px; display: flex; flex-wrap: wrap; gap: 4px 14px; } .doc ul.strip li { display: inline-flex; align-items: center; gap: 6px; }
+  .doc details.full { font-size: 12px; color: var(--ink-2); margin: 0 0 8px; } .doc details.full summary { cursor: pointer; }
+  .doc .grades .reason { font-size: 13px; color: var(--ink); margin-top: 2px; }
+  .task-full { font-size: 13px; color: var(--ink-2); margin: -2px 0 6px; max-width: 75ch; text-wrap: pretty; }
+  .doc ul.thread { list-style: none; padding: 0 0 0 10px; margin: 6px 0 0; border-left: 1px solid var(--grid); font-size: 12px; color: var(--ink-2); } .doc ul.thread li { margin: 3px 0; }
+  .doc .what-was { color: var(--ink-2); font-size: 12px; }
   .doc details.raw { margin-top: 10px; font-size: 12px; color: var(--ink-2); } .doc details.raw pre { white-space: pre-wrap; font-size: 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin: 6px 0 0; }
   /* each agent's pane carries its voice: its hairline in the voice colour and
      a dot by its name (a hairline, not a thick stripe, like every border here) */
@@ -133,36 +147,48 @@
   /* headings wrap into even lines; prose avoids a lone word on its last line */
   h1, h2, h3, h4, .md .md-h1, .md .md-h2, .md .md-h3, .md .md-h4 { text-wrap: balance; }
   .md p, .md li { text-wrap: pretty; }
+  .doc .md p, .doc .md li, .doc .fix, .doc .grades li, .doc .answers li { max-width: 75ch; }
   .md p { margin: 6px 0; } .md ul, .md ol { margin: 4px 0 6px; padding-left: 20px; }
   .md li { margin: 1px 0; }
   .md pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
-  .md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--surface); padding: 0 4px; border-radius: 4px; }
+  .md code, .file-ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--surface); padding: 0 4px; border-radius: 4px; }
   .md pre code { background: none; padding: 0; }
   .md table { font-size: 12px; margin: 6px 0; } .md th, .md td { padding: 4px 8px; }
   .md .front { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
   .md .front span b { color: var(--ink); font-weight: 500; }
   .md .verdict { font-weight: 600; }
-  .md .cid, .ledger .cid, .doc .cid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface); padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); }
+  .md .cid, .ledger .cid, .doc .cid, .verdict .cid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface); padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); }
   a.cid { color: var(--ink); text-decoration: none; } a.cid:hover { text-decoration: underline; }
   /* every mention of the comment under the pointer or focus, and the one jumped to */
   .cid.hl { background: var(--hover); border-color: var(--action); }
   .cid-target { outline: 2px solid var(--action); outline-offset: 2px; border-radius: 4px; }
-  .verdict-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14px; margin: 4px 0 12px; max-width: 80ch; text-wrap: pretty; }
-  .end-recap { border-top: 1px solid var(--grid); padding-top: 12px; margin-top: 16px; } .end-recap .verdict-line { margin-bottom: 4px; }
-  .next-step { font-size: 13px; color: var(--ink-2); margin: -4px 0 12px; } .next-step code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--ink); }
+  /* the verdict band: the outcome in page-title type behind its status dot, between hairlines */
+  .verdict { border-top: 1px solid var(--grid); border-bottom: 1px solid var(--grid); padding: 12px 0 10px; margin: 6px 0 16px; }
+  .verdict-end { margin: 20px 0 4px; border-bottom: 0; }
+  .verdict-main { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; line-height: 1.3; margin: 0 0 4px; }
+  .verdict .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .verdict .dot.good { background: var(--good); } .verdict .dot.serious { background: var(--serious); } .verdict .dot.critical { background: var(--critical); }
+  .verdict .dot.warning { background: var(--warning); } .verdict .dot.active { background: var(--ink-2); }
+  .verdict-detail { font-size: 14px; margin: 0 0 6px; max-width: 75ch; text-wrap: pretty; }
+  .verdict .next-step { margin: 0 0 6px; } .verdict-back { font-size: 13px; margin: 0; }
+  .next-step { font-size: 13px; color: var(--ink-2); margin: -4px 0 12px; } .next-step code { white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--ink); }
+  .provenance { font-size: 13px; color: var(--ink-2); margin: -2px 0 6px; } 
   .record-note { font-size: 13px; color: var(--ink-2); margin: -4px 0 12px; max-width: 75ch; }
   details.run-details, details.summary-file { font-size: 13px; color: var(--ink-2); margin: 0 0 12px; }
   details.run-details .kv { margin: 8px 0 0; } details.summary-file .doc { margin-top: 8px; }
   .ledger { margin: 4px 0 16px; }
-  .primer { font-size: 13px; color: var(--ink-2); max-width: 62ch; margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
+  .primer { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 8px 16px; font-size: 12px; color: var(--ink-2); margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
+  .primer dt { font-weight: 600; color: var(--ink); font-size: 12px; } .primer dd { margin: 2px 0 0; max-width: 45ch; }
   .ledger h3 { font-size: 14px; margin: 0 0 4px; }
   .ledger .lead { font-size: 14px; margin: 0 0 8px; text-wrap: pretty; }
   .ledger table { font-size: 13px; }
-  .ledger td { vertical-align: top; }
+  .ledger td { vertical-align: top; } .ledger tr:focus { outline: 2px solid var(--action); outline-offset: -2px; }
   .ledger .what { min-width: 220px; max-width: 46ch; }
   .ledger .meta, .ledger .fix { color: var(--ink-2); font-size: 12px; }
   .ledger .steps { margin: 0; padding: 0; list-style: none; }
   .ledger .steps li + li { margin-top: 4px; }
+  .ledger .steps .again, .ledger .since { color: var(--ink-2); font-size: 12px; }
+  .ledger .since { display: block; margin-top: 2px; white-space: nowrap; }
   .ledger .raised { white-space: nowrap; }
   .md blockquote { border-left: 3px solid var(--axis); margin: 6px 0; padding-left: 10px; color: var(--ink-2); }
   .usage-table { margin-top: 10px; }
@@ -181,6 +207,7 @@
   .cfg-row .err { color: var(--critical-text); }
   .cfg-row .tools { float: right; }
   button.mini { font-size: 11px; padding: 0 6px; margin-left: 4px; min-height: 24px; }
+  .cfg-row .src:has(> button.mini) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; } .cfg-row .src > button.mini { margin-left: 0; }
   .cfg-row .check { display: flex; align-items: center; gap: 8px; }
   /* simple mode: where each value comes from, and the per-field write/unset
      tools, appear only when "Show where values come from" is on */
@@ -193,6 +220,10 @@
   .cfg-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
   .cfg-actions button.primary { background: var(--action); color: var(--on-action); border-color: transparent; }
   .cfg-actions button.primary:hover { opacity: .9; }
+  .cfg-actions button.primary:disabled { background: var(--surface); color: var(--ink); border-color: var(--border); }
+  details.cmd-alt { font-size: 13px; color: var(--ink-2); margin: 8px 0 0; } details.cmd-alt pre.cmd { margin: 6px 0; }
+  #loops.no-cost .cost { display: none; }
+  @media (min-width: 641px) { .nav #theme { margin-left: 8px; } }
   pre.cmd { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
   .cfg-out { font-size: 12px; white-space: pre-wrap; margin-top: 8px; color: var(--ink-2); }
   .cfg-out.ok { color: var(--good-text); } .cfg-out.err { color: var(--critical-text); }
@@ -216,14 +247,14 @@
   #start-task { width: 100%; min-height: 72px; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; resize: vertical; box-sizing: border-box; }
   .start-banner { font-size: 14px; margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--action); border-radius: 8px; background: var(--page); }
   .start-banner p { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; } .start-banner .mono { overflow-wrap: anywhere; }
-  .start-summary { font-size: 13px; color: var(--ink-2); margin: 4px 0 8px; max-width: 75ch; }
+  .start-summary { font-size: 13px; color: var(--ink-2); margin: 4px 0 8px; max-width: 65ch; text-wrap: pretty; }
   .start-next h3 { font-size: 14px; margin: 0 0 4px; } .start-next button { margin-top: 8px; }
   .start-next { font-size: 13px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
   details.cfg-how { display: inline; } details.cfg-how > summary { display: inline; color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   details.cfg-files { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
   details > summary { padding: 3px 0; cursor: pointer; }
   details.cfg-files code { font-size: 11px; }
-  @media (max-width: 640px) { .task { max-width: 200px; } th.opt, td.opt { display: none; } .when-small { display: block; } }
+  @media (max-width: 640px) { .task { max-width: 190px; } th.opt, td.opt { display: none; } .when-small { display: block; } #loops .chip { white-space: normal; } #loops td, #loops th { padding-left: 6px; padding-right: 6px; } }
   details.stats-fold { margin-bottom: 20px; } details.stats-fold > summary { font-size: 13px; color: var(--ink-2); margin-bottom: 8px; }
   /* on a phone each comment stacks: what it is, where it stands, what happened
      (explicit table roles keep the semantics that display: block would drop) */
@@ -302,7 +333,7 @@
       <div style="overflow:auto">
       <table id="loops">
         <thead><tr>
-          <th class="opt">Started</th><th>Task</th><th>Outcome</th><th class="num">Rounds</th><th class="opt share-hide">Backend</th><th class="num opt share-hide">Coder</th><th class="num opt share-hide">Review</th><th class="num opt share-hide">Cost</th>
+          <th class="opt">Started</th><th>Task</th><th>Outcome</th><th class="num">Rounds</th><th class="opt share-hide">Backend</th><th class="num opt share-hide">Coder</th><th class="num opt share-hide">Review</th><th class="num opt share-hide cost">Cost</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -328,6 +359,7 @@
       <p class="start-summary" id="start-summary"></p>
       <div class="cfg-actions" id="start-actions"></div>
       <pre class="cmd" id="start-cmd"></pre>
+      <details class="cmd-alt" id="start-alt"><summary>Or run it in a terminal, in the project</summary><pre class="cmd" id="start-cmd-sh"></pre><button type="button" class="mini" id="start-copy-sh">Copy terminal command</button></details>
       <div class="cfg-out" id="start-out" role="status"></div>
       <div class="start-next" id="start-next" style="display:none"></div>
     </div>
@@ -394,7 +426,7 @@ var RL = (function () {
     const coderTimeState = rounds.length === 0 || withCoder.length === 0 ? 'none'
       : (withCoder.length < rounds.length ? 'partial' : (underestimated ? 'underestimated' : 'complete'));
     const reviewTime = rounds.reduce((a, r) => a + (r.duration_s || 0), 0);
-    return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), st, rounds, roundCount, outcome, duration, coder, reviewer, cost, extendedRounds,
+    return { id: st.loop_id, dir: l.dir, task: (l.task || '').trim(), title: loopTitle(l.task), st, rounds, roundCount, outcome, duration, coder, reviewer, cost, extendedRounds,
       files, summary: l.summary, usage: !!st.usage || rounds.some(r => r.reviewer || r.coder), reviewerUnknown,
       coderTime, coderTimeState, coderRoundsRecorded: withCoder.length, coderRoundsUnderestimated: underestimated, reviewTime };
   }
@@ -531,17 +563,27 @@ var RL = (function () {
     if (f.usage != null && !!f.usage !== !!e.usage) out.usage = !!f.usage;
     return out;
   }
-  function startCommand(script, f, effective) {
-    const p = startPayload(f, effective);
-    if (!p.task) return '';
-    const out = ['bash', shq(script)];
+  function startFlags(p) {
+    const out = [];
     if ('backend' in p) out.push('--backend', shq(p.backend));
     if ('model' in p) out.push('--model', shq(p.model));
     if ('effort' in p) out.push('--effort', shq(p.effort));
     if ('max_rounds' in p) out.push('--max-rounds', shq(String(p.max_rounds)));
     if ('usage' in p) out.push(p.usage ? '--usage' : '--no-usage');
-    out.push('--', shq(p.task));
-    return out.join(' ');
+    return out;
+  }
+  function startCommand(script, f, effective) {
+    const p = startPayload(f, effective);
+    if (!p.task) return '';
+    return ['bash', shq(script), ...startFlags(p), '--', shq(p.task)].join(' ');
+  }
+  // The same request as a line to paste into Claude Code, where the user
+  // already is: /review-loop passes its arguments to start.sh through the
+  // shell, so the task is quoted the same way ("--" only when it needs it).
+  function slashCommand(f, effective) {
+    const p = startPayload(f, effective);
+    if (!p.task) return '';
+    return ['/review-loop', ...startFlags(p), ...(p.task.startsWith('-') ? ['--'] : []), shq(p.task)].join(' ');
   }
   // One line saying what Start will run, from the form and the inherited
   // configuration ("" values mean the backend's own default).
@@ -781,25 +823,63 @@ var RL = (function () {
       c.steps.sort((a, b) => a.round - b.round);
       const graded = c.steps.filter(x => x.reviewer);
       c.status = graded.length ? graded[graded.length - 1].reviewer.status : 'open';
-      // A later review re-grades every earlier ID; a grade that repeats the
-      // previous one with no coder answer in between adds nothing to the trail.
-      let last = null;
+      // since: the round whose review first gave the current status.
+      c.since = null;
+      for (let k = graded.length - 1; k >= 0 && graded[k].reviewer.status === c.status; k--) c.since = graded[k].round;
+      // A later review re-grades every earlier ID, and a coder may repeat its
+      // answer: a step that changes nothing (same answer, same grade, and no
+      // new reason while the comment is still contested) is not part of the
+      // trail; reviewers re-word the reason for a settled grade every round. Rounds where the coder repeated its
+      // answer and the reviewer kept the grade are kept as "re-confirmed".
+      let last = null, lastReason = '', lastAnswer = null;
+      c.reconfirmed = [];
       c.steps = c.steps.filter(x => {
-        const keep = x.coder || (x.reviewer && (x.reviewer.status !== last || x.reviewer.reason));
-        if (x.reviewer) last = x.reviewer.status;
-        return keep;
+        const answer = x.coder ? x.coder.status + '\n' + x.coder.note : null;
+        const contested = x.reviewer && (x.reviewer.status === 'unresolved' || x.reviewer.status === 'declined-rejected');
+        // Only a graded step can change nothing: an answer the next review has
+        // not graded yet is news, even when it repeats the last one.
+        const sameGrade = !!x.reviewer && x.reviewer.status === last && (!contested || !x.reviewer.reason || x.reviewer.reason === lastReason);
+        const same = sameGrade && (!x.coder || answer === lastAnswer);
+        if (same && x.coder) c.reconfirmed.push(x.round);
+        if (x.reviewer) { if (x.reviewer.status !== last) lastReason = ''; last = x.reviewer.status; if (x.reviewer.reason) lastReason = x.reviewer.reason; }
+        if (x.coder) lastAnswer = answer;
+        return !same;
       });
     }
     return list;
   }
-  // One plain sentence for the ledger head: how many, how many blocking, and
-  // whether any blocking comment is still open or unresolved.
+  // The ledger head: how many comments, how many blocking. Where the blocking
+  // ones stand is the verdict band's job (blockingState), so it is not repeated.
   function ledgerSummary(list) {
     if (!list.length) return 'No comments were raised.';
-    const blocking = list.filter(c => c.blocking), stuck = blocking.filter(c => c.status !== 'resolved' && c.status !== 'declined-accepted');
-    const head = `${list.length} comment${list.length === 1 ? '' : 's'}, ${blocking.length} blocking.`;
-    if (!blocking.length) return head;
-    return head + (stuck.length ? ` ${stuck.length === 1 ? 'Still open or unresolved' : stuck.length + ' still open or unresolved'}: ${stuck.map(c => c.id).join(', ')}.` : ' All blocking comments were resolved.');
+    const disputed = list.filter(c => c.steps.some(isDisputed)).length;
+    return `${list.length} comment${list.length === 1 ? '' : 's'}, ${list.filter(c => c.blocking).length} blocking${disputed ? `, ${disputed} disputed` : ''}.`;
+  }
+  // A short excerpt for a one-line mention: whole words, never ending inside
+  // a code span, with an ellipsis when cut.
+  function snippet(text, n = 90) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    if (t.length <= n) return t;
+    let cut = t.slice(0, n);
+    const sp = cut.lastIndexOf(' '); if (sp > n / 2) cut = cut.slice(0, sp);
+    if ((cut.match(/`/g) || []).length % 2) cut = cut.slice(0, cut.lastIndexOf('`'));
+    return cut.replace(/[\s,;:.—–-]+$/, '') + '…';
+  }
+  // A loop's name in lists, headings and charts: the task's first line, cut
+  // at its first sentence, with a capital letter. The page keeps the full task.
+  function loopTitle(task) {
+    const line = String(task || '').trim().split('\n')[0].trim();
+    const m = line.match(/^(.+?[.!?])(?:\s|$)/);
+    const t = m && m[1].length >= 12 ? m[1] : line;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  // Whether any blocking comment still stands in the way: text for the
+  // verdict band, and the IDs it lists (the page links them to the comments).
+  function blockingState(list) {
+    const blocking = (list || []).filter(c => c.blocking), stuck = blocking.filter(c => c.status !== 'resolved' && c.status !== 'declined-accepted');
+    if (!blocking.length) return { text: (list || []).length ? 'No blocking comments.' : '', open: [] };
+    if (!stuck.length) return { text: 'All blocking comments were resolved.', open: [] };
+    return { text: `Blocking comment${stuck.length === 1 ? '' : 's'} still open or unresolved:`, open: stuck.map(c => c.id) };
   }
   // ── Verdicts, progress and the recap ─────────────────────────────────────
   // A review split into what the page shows: grades of earlier comments, new
@@ -826,6 +906,22 @@ var RL = (function () {
     let end = lines.findIndex((l, i) => i > start && /^##\s/.test(l)); if (end < 0) end = lines.length;
     const responses = parseCoderResponses(lines.slice(start, end).join('\n'));
     return { body: [...lines.slice(0, start), ...lines.slice(end)].join('\n').trim(), responses };
+  }
+  // A disagreement worth seeing first: the coder says fixed and the reviewer
+  // finds it unresolved, or the coder declines and the reviewer rejects that.
+  function isDisputed(step) {
+    const c = step && step.coder && step.coder.status, r = step && step.reviewer && step.reviewer.status;
+    return (c === 'fixed' && r === 'unresolved') || (c === 'declined' && r === 'declined-rejected');
+  }
+  // Who reviewed and against what: the independent reviewer is the point of
+  // the product, so it is named up front. The empty-tree base (a repository
+  // with no commits yet) is not worth showing.
+  function provenance(st) {
+    const parts = [];
+    if (st.backend) parts.push(`Reviewed by ${st.backend}` + (st.model || st.effort ? ` (${[st.model, st.effort ? st.effort + ' effort' : ''].filter(Boolean).join(', ')})` : ''));
+    if (st.branch) parts.push(`branch ${st.branch}`);
+    if (st.base_ref && st.base_ref !== '4b825dc642cb6eb9a060e54bf8d69288fbee4904') parts.push(`base ${String(st.base_ref).slice(0, 7)}`);
+    return parts.join(' · ');
   }
   // A comment's chip. A comment nobody graded is "open" only while the loop
   // runs; in a finished loop it is still open (blocking) or not addressed.
@@ -883,10 +979,6 @@ var RL = (function () {
       paused: `In round ${at}, waiting for the user.`
     }[l.outcome] || `After ${l.roundCount} round${l.roundCount === 1 ? '' : 's'}.`;
   }
-  // The closing recap: the detail plus where the comments stand.
-  function loopRecap(l, ledger) {
-    return ledger && ledger.length ? verdictDetail(l) + ' ' + ledgerSummary(ledger) : verdictDetail(l);
-  }
   // The link to one loop's page; parseRoute reads it back.
   const loopHref = id => '#/loop/' + encodeURIComponent(id);
   // Charts are drawn as SVG for sighted users; screen readers get the same
@@ -907,7 +999,7 @@ var RL = (function () {
 
   return { OUTCOME, deriveLoop, fmtDur, fmtCoderTime, minutesFloor, getPath, toRaw, scopeFlags, buildCommand, validateValue, coerceValue, diffConfig, applyToFile, losslessJSON, parseRoute,
     timeUnit, ROLES, groupKeys, roleStatus, placeholders, promptLabel, rolesLabel, togglePreset,
-    reviewVerdict, reviewParts, coderParts, commentStatus, nextStep, roundVerdicts, roundProgress, verdictDetail, loopRecap, CID, COMMENT_STATUS, parseReviewComments, parseCoderResponses, commentLedger, ledgerSummary, effortChoices, catalogChoices, catalogSelection, readCatalog, shq, startPayload, startCommand, startSummary, activeLoopFor,
+    reviewVerdict, reviewParts, coderParts, commentStatus, nextStep, isDisputed, provenance, roundVerdicts, roundProgress, verdictDetail, CID, COMMENT_STATUS, parseReviewComments, parseCoderResponses, commentLedger, ledgerSummary, blockingState, snippet, loopTitle, effortChoices, catalogChoices, catalogSelection, readCatalog, shq, startPayload, startCommand, slashCommand, startSummary, activeLoopFor,
     loopHref, chartTable, readJson };
 })();
 if (typeof module !== 'undefined') module.exports = RL;
@@ -1032,6 +1124,15 @@ if (typeof module !== 'undefined') module.exports = RL;
   function niceTicks(max, n) { const raw = max / n, p = Math.pow(10, Math.floor(Math.log10(raw))); const step = [1, 2, 5, 10].map(m => m * p).find(s => s >= raw) || p; const out = []; for (let v = 0; v <= max + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000); return out; }
 
   // ── markdown (tiny, no network) ──────────────────────────────────────────
+  // A Markdown link: a web URL opens in a new tab; a file path shows its name
+  // and line (from the target when the label lacks one) in the code style.
+  function mdLink(target, labelHtml) {
+    if (/^https?:\/\//i.test(target)) return `<a href="${esc(target)}" target="_blank" rel="noopener noreferrer">${labelHtml}</a>`;
+    const rel = DATA.root && target.startsWith(DATA.root + '/') ? target.slice(DATA.root.length + 1) : target;
+    const line = (rel.match(/(:\d+(?:-\d+)?|#L\d+(?:-L?\d+)?)$/) || [''])[0].replace(/^#L/, ':').replace(/-L/, '-');
+    const shown = line && !/:\d+$/.test(labelHtml) ? labelHtml + line : labelHtml;
+    return `<span class="file-ref" title="${esc(rel)}">${shown}</span>`;
+  }
   function md(src, base = 4) {
     const lines = String(src || '').replace(/\r/g, '').split('\n');
     let out = '', i = 0, front = null;
@@ -1040,10 +1141,17 @@ if (typeof module !== 'undefined') module.exports = RL;
     // Code spans first, closed by a backtick run of the same length (so ``a `b` c``
     // works); nothing inside them is formatted. They are parked as placeholders
     // while bold, comment IDs and the verdict are marked up around them.
+    // Links are parked the same way: a web URL stays a link; a file path (what
+    // agents write) shows as "name:line", with its project-relative path on
+    // hover, because a link to the sender's disk goes nowhere in a browser.
     const inline = s => {
-      const codes = [];
-      const text = String(s).replace(/(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (m, ticks, body) => { codes.push(body.replace(/^ ([\s\S]*[^ ]) $/, '$1')); return '\u0000' + (codes.length - 1) + '\u0000'; });
-      return esc(text).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\b(R\d+-C\d+)\b/g, '<span class="cid">$1</span>').replace(/^(VERDICT:\s*\w+)$/i, '<span class="verdict">$1</span>')
+      const codes = [], links = [];
+      let text = String(s).replace(/(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (m, ticks, body) => { codes.push(body.replace(/^ ([\s\S]*[^ ]) $/, '$1')); return '\u0000' + (codes.length - 1) + '\u0000'; });
+      text = text.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, label, target) => { links.push({ label, target }); return '\u0001' + (links.length - 1) + '\u0001'; });
+      const marks = t => esc(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*(?![\s*])([^*\n]*?[^\s*])\*(?!\*)/g, '$1<em>$2</em>')
+        .replace(/\b(R\d+-C\d+)\b/g, '<span class="cid">$1</span>');
+      return marks(text).replace(/^(VERDICT:\s*\w+)$/i, '<span class="verdict">$1</span>')
+        .replace(/\u0001(\d+)\u0001/g, (m, n) => mdLink(links[n].target, marks(links[n].label)))
         .replace(/\u0000(\d+)\u0000/g, (m, n) => '<code>' + esc(codes[n]) + '</code>');
     };
     // A list item continues on following indented lines that do not start a new item.
@@ -1082,11 +1190,27 @@ if (typeof module !== 'undefined') module.exports = RL;
   // The next step, as the command to copy (never on a shared page).
   function nextHtml(l) {
     const n = RL.nextStep(l);
-    return n && !SHARE ? `<p class="next-step">${esc(n.text)} <code>${esc(n.cmd)}</code> <button type="button" class="mini" data-copy="${esc(n.cmd)}">Copy</button> ${esc(n.after)}</p>` : '';
+    return n && !SHARE ? `<p class="next-step">${esc(n.text)} <code>${esc(n.cmd)}</code> <button type="button" class="mini" data-copy="${esc(n.cmd)}" aria-label="Copy ${esc(n.cmd)}">Copy</button> ${esc(n.after)}</p>` : '';
+  }
+  // The verdict band: the answer a reader opens a loop for, before anything
+  // else. The outcome in headline type behind its status dot, how and when the
+  // loop ended, and any blocking comment still in the way (as links to it).
+  // The page ends on the same band, so the record closes on its result.
+  function verdictBand(l, ledger, end) {
+    const [cls, label] = OUTCOME[l.outcome] || ['neutral', l.outcome];
+    const b = RL.blockingState(ledger);
+    const open = b.open.map(id => `<span class="cid">${esc(id)}</span>`).join(', ');
+    return `<div class="verdict${end ? ' verdict-end' : ''}">
+      <p class="verdict-main"><span class="dot ${cls}" aria-hidden="true"></span>${esc(label)}</p>
+      <p class="verdict-detail">${esc(RL.verdictDetail(l))}${b.text ? ' ' + esc(b.text) : ''}${open ? ' ' + open + '.' : ''}</p>
+      ${nextHtml(l)}${end ? '<p class="verdict-back"><a href="#/">All loops</a></p>' : ''}</div>`;
   }
   // ── The two panes of a round ─────────────────────────────────────────────
   const grade = st => { const [cls, label] = RL.COMMENT_STATUS[st] || ['neutral', st]; return `<span class="chip ${cls}"><i></i>${esc(label)}</span>`; };
   const inlineMd = t => md(t).replace(/^<p>([\s\S]*)<\/p>$/, '$1');
+  // A structured "file:" field, shown like a Markdown file link: name:line in
+  // mono, the full path on hover (a repository path wraps over three lines).
+  const fileRef = (file, line) => `<span class="file-ref" title="${esc(file + (line ? ':' + line : ''))}">${esc(String(file).split('/').pop())}${line ? ':' + esc(line) : ''}</span>`;
   const rawFile = (label, text) => `<details class="raw"><summary>${label}</summary><pre>${esc(text)}</pre></details>`;
   // The coder's summary, and each answer beside the grade the same round's
   // review gave it.
@@ -1094,27 +1218,36 @@ if (typeof module !== 'undefined') module.exports = RL;
     if (!f.coder) return '<span class="empty">not written</span>';
     const parts = RL.coderParts(f.coder), graded = {};
     for (const g of RL.parseReviewComments(f.review).statuses) graded[g.id] = g;
-    const answers = parts.responses.length ? `<h5 class="rv-h">Answers to the previous review</h5><ul class="answers">${parts.responses.map(a => {
+    // A compact strip (ID, answer, the grade it got); the notes fold below it,
+    // because the ledger already tells each comment's story.
+    const answers = parts.responses.length ? `<h5 class="rv-h">Answers to the previous review</h5><ul class="strip">${parts.responses.map(a => {
       const g = graded[a.id];
-      return `<li><span class="cid">${esc(a.id)}</span> <b>${esc(a.status)}</b>${a.note ? ': ' + inlineMd(a.note) : ''}${g ? ` <span class="then">reviewer:</span> ${grade(g.status)}` : ''}</li>`;
-    }).join('')}</ul>` : '';
+      return `<li><span class="cid">${esc(a.id)}</span> ${esc(a.status)}${g ? ` <span class="then">graded</span> ${grade(g.status)}` : ''}</li>`;
+    }).join('')}</ul>`
+      + `<details class="full"><summary>The coder's notes</summary><ul class="answers">${parts.responses.map(a => `<li><span class="cid">${esc(a.id)}</span> <b>${esc(a.status)}</b>${a.note ? ': ' + inlineMd(a.note) : ''}</li>`).join('')}</ul></details>` : '';
     return `<div class="md">${md(parts.body, 5)}</div>${answers}${rawFile('Coder summary file', f.coder)}`;
   }
   // The review as an exchange: grades of earlier comments, then each new
   // comment laid out like its ledger row (it is the target of every link to
   // that ID), then the assessment. A free-form review stays plain markdown.
-  function reviewerPane(f) {
+  function reviewerPane(f, byId) {
     if (!f.review) return '<span class="empty">no review</span>';
+    byId = byId || {};
     const parts = RL.reviewParts(f.review);
     if (!parts.structured) return `<div class="md">${md(f.review, 5)}</div>`;
     const comment = c => {
-      const x = c.fields, where = x.file ? `<span class="mono">${esc(x.file)}${x.line ? ':' + esc(x.line) : ''}</span>` : '';
+      // What happened to the comment afterwards is the ledger's to tell.
+      const x = c.fields, where = x.file ? fileRef(x.file, x.line) : '';
       const kind = /^yes$/i.test(x.blocking || '') ? 'blocking' : (c.optional ? 'optional' : 'non-blocking');
-      return `<div class="rc" data-cid-at="${esc(c.id)}" tabindex="-1"><div class="rc-head"><span class="cid">${esc(c.id)}</span> <span class="meta">${[x.severity, kind].filter(Boolean).map(esc).join(' · ')}${where ? ' · ' + where : ''}</span></div>
+      return `<div class="rc" data-cid-at="${esc(c.id)}" tabindex="-1"><div class="rc-head"><span class="cid">${esc(c.id)}</span> <span class="meta">${[x.severity, kind].filter(Boolean).map(esc).join(' · ')}${where ? ' · ' + where : ''}</span><a class="to-ledger" href="${esc(location.hash || '#')}" data-ledger="${esc(c.id)}">Back to the comment list</a></div>
         ${x.description ? `<div class="md">${inlineMd(x.description)}</div>` : ''}${x['suggested fix'] ? `<div class="fix md">Suggested fix: ${inlineMd(x['suggested fix'])}</div>` : ''}</div>`;
     };
     const main = parts.comments.filter(c => !c.optional), opt = parts.comments.filter(c => c.optional);
-    return (parts.statuses.length ? `<h5 class="rv-h">Earlier comments</h5><ul class="grades">${parts.statuses.map(g => `<li><span class="cid">${esc(g.id)}</span> ${grade(g.status)}${g.reason ? ' <span class="md">' + inlineMd(g.reason) + '</span>' : ''}</li>`).join('')}</ul>` : '')
+    // Earlier comments: a strip of grades, then (folded) what each comment was
+    // and the reviewer's reason, each on its own line so they never run together.
+    const what = id => { const d = (byId[id] || {}).description || ''; return d ? `<div class="what-was">${inlineMd(RL.snippet(d))}</div>` : ''; };
+    return (parts.statuses.length ? `<h5 class="rv-h">Earlier comments</h5><ul class="strip">${parts.statuses.map(g => `<li><span class="cid">${esc(g.id)}</span> ${grade(g.status)}</li>`).join('')}</ul>`
+      + `<details class="full"><summary>What each was, and the reasons</summary><ul class="grades">${parts.statuses.map(g => `<li><span class="cid">${esc(g.id)}</span> ${grade(g.status)}${what(g.id)}${g.reason ? `<div class="reason md">Reason: ${inlineMd(g.reason)}</div>` : ''}</li>`).join('')}</ul></details>` : '')
       + (main.length ? `<h5 class="rv-h">New comments</h5>${main.map(comment).join('')}` : '')
       + (opt.length ? `<h5 class="rv-h">Optional</h5>${opt.map(comment).join('')}` : '')
       + (!parts.statuses.length && !parts.comments.length ? '<p class="meta">No comments.</p>' : '')
@@ -1123,7 +1256,10 @@ if (typeof module !== 'undefined') module.exports = RL;
       + rawFile('Review file', f.review);
   }
   // For a reader who has never used review-loop: what the page records.
-  const PRIMER = `<div class="primer"><b>How to read this page.</b> A coder agent did the task and a separate reviewer agent checked it, round by round. Each review comment has an ID (<span class="mono">R1-C2</span> is round 1, comment 2). The coder answers each one as fixed or declined, and the reviewer grades it resolved, unresolved, or declined (accepted or rejected). Blocking comments must be resolved before the reviewer approves. A comment not graded yet is still open; an optional one may be left unaddressed. The round cap is the most rounds a loop may take before it stops.</div>`;
+  const PRIMER = `<dl class="primer" aria-label="How to read this page">
+    <div><dt>Comment IDs</dt><dd><span class="mono">R1-C2</span> is comment 2 of round 1's review; follow one to where it was raised.</dd></div>
+    <div><dt>Answers and grades</dt><dd>The coder answers fixed or declined; the reviewer grades resolved, unresolved, or declined (accepted or rejected). Disputed: the reviewer disagreed with the answer.</dd></div>
+    <div><dt>Blocking and the round cap</dt><dd>Blocking comments must be resolved before approval; optional ones may stay unaddressed. The round cap is the most rounds a loop may take.</dd></div></dl>`;
   const SHARE = !!DATA.share;
   if (SHARE) { document.body.classList.add('reader'); $('#nav-start').hidden = true; $('#nav-config').hidden = true; }
   {
@@ -1163,11 +1299,11 @@ if (typeof module !== 'undefined') module.exports = RL;
     const short = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, narrow ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
     // The date only helps when the loops differ in it.
     const oneDay = new Set(rows.map(l => String(l.st.started_at || '').slice(0, 10))).size <= 1;
-    const label = l => oneDay ? (l.task || l.id) : `${short(l.st.started_at)} · ${(l.task.length > 17 ? l.task.slice(0, 16) + '…' : l.task) || l.id}`;
+    const label = l => oneDay ? (l.title || l.id) : `${short(l.st.started_at)} · ${(l.title.length > 17 ? l.title.slice(0, 16) + '…' : l.title) || l.id}`;
     barChart($('#chart-rounds'), rows.slice(0, 25).map(l => ({
       id: l.id, label: label(l), marker: l.st.max_rounds, end: `${l.roundCount}/${l.st.max_rounds || '?'}`,
       segments: [{ name: 'rounds', value: l.roundCount, color: 'var(--muted)' }],
-      tip: () => `<b>${esc(l.task)}</b><br>${chip(l.outcome)} · ${l.roundCount} of ${l.st.max_rounds} rounds · ${esc(l.st.backend)}`
+      tip: () => `<b>${esc(l.title)}</b><br>${chip(l.outcome)} · ${l.roundCount} of ${l.st.max_rounds} rounds · ${esc(l.st.backend)}`
     })), { label: 'Rounds per loop', empty: none, max: Math.max(0, ...rows.map(l => l.st.max_rounds || 0)) });
     const timeRows = rows.filter(l => l.coderTime + l.reviewTime > 0).slice(0, 25);
     const unit = RL.timeUnit(timeRows.map(l => l.coderTime + l.reviewTime));
@@ -1175,28 +1311,33 @@ if (typeof module !== 'undefined') module.exports = RL;
     barChart($('#chart-time'), timeRows.map(l => ({
       id: l.id, label: label(l) + (l.coderTimeState === 'partial' || l.coderTimeState === 'underestimated' ? ' *' : ''),
       segments: [{ name: 'coder', value: unit.value(l.coderTime), color: 'var(--s1)' }, { name: 'reviewer', value: unit.value(l.reviewTime), color: 'var(--s2)' }],
-      tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${s.name === 'coder' ? fmtCoderTime(l, true) : fmtDur(l.reviewTime)}<br>coder ${fmtCoderTime(l, true)} · reviewer ${fmtDur(l.reviewTime)} · ${l.roundCount} round${l.roundCount === 1 ? '' : 's'}`
+      tip: s => `<b>${esc(l.title)}</b><br>${s.name}: ${s.name === 'coder' ? fmtCoderTime(l, true) : fmtDur(l.reviewTime)}<br>coder ${fmtCoderTime(l, true)} · reviewer ${fmtDur(l.reviewTime)} · ${l.roundCount} round${l.roundCount === 1 ? '' : 's'}`
     })), { label: unit.name + ' per loop', empty: rows.length ? 'No timing recorded for these loops yet.' : none });
     $('#time-note').textContent = timeRows.some(l => l.coderTimeState === 'partial' || l.coderTimeState === 'underestimated') ? '* lower bound: some rounds of this loop were recorded before coder timing existed, or a pause ended late (no resume hook), so the coder bar is at least this long.' : '';
     const tokRows = rows.filter(l => l.usage && ((l.coder.output_tokens || 0) + (l.reviewer.output_tokens || 0)) > 0).slice(0, 25);
     $('#card-tokens').style.display = '';
+    // An empty chart has nothing to label.
+    $('#card-tokens .legend').style.display = tokRows.length ? '' : 'none';
+    $('#card-time .legend').style.display = timeRows.length ? '' : 'none';
     barChart($('#chart-tokens'), tokRows.map(l => ({
       id: l.id, label: label(l),
       segments: [{ name: 'coder', value: l.coder.output_tokens || 0, color: 'var(--s1)' }, { name: 'reviewer', value: l.reviewer.output_tokens || 0, color: 'var(--s2)' }],
-      tip: s => `<b>${esc(l.task)}</b><br>${s.name}: ${fmtNum(s.value)} output tokens<br>coder ${fmtNum(l.coder.output_tokens)} · reviewer ${l.reviewerUnknown ? '≥ ' : ''}${fmtNum(l.reviewer.output_tokens)}${l.cost != null ? ' · ' + fmtCost(l.cost) : ''}${l.reviewerUnknown ? `<br>reviewer usage unknown for ${l.reviewerUnknown} round(s)` : ''}`
+      tip: s => `<b>${esc(l.title)}</b><br>${s.name}: ${fmtNum(s.value)} output tokens<br>coder ${fmtNum(l.coder.output_tokens)} · reviewer ${l.reviewerUnknown ? '≥ ' : ''}${fmtNum(l.reviewer.output_tokens)}${l.cost != null ? ' · ' + fmtCost(l.cost) : ''}${l.reviewerUnknown ? `<br>reviewer usage unknown for ${l.reviewerUnknown} round(s)` : ''}`
     })), { label: 'Output tokens per loop', empty: rows.length ? 'No token usage recorded. Turn on usage tracking when starting a loop to see it here.' : none });
 
     // table
     $('#loops tbody').innerHTML = rows.map(l => `<tr data-id="${esc(l.id)}" class="${l.id === selected ? 'selected' : ''}">
       <td class="when opt">${esc(fmtDate(l.st.started_at))}</td>
-      <td><div class="task" title="${esc(l.task)}"><a href="${esc(RL.loopHref(l.id))}">${esc(l.task || l.id)}</a></div><div class="when-small">${esc(fmtDate(l.st.started_at))}</div></td>
+      <td><div class="task" title="${esc(l.task)}"><a href="${esc(RL.loopHref(l.id))}">${esc(l.title || l.id)}</a></div><div class="when-small">${esc(fmtDate(l.st.started_at))}</div></td>
       <td>${chip(l.outcome)}</td>
       <td class="num">${l.roundCount} / ${l.st.max_rounds || '?'}</td>
       <td class="opt share-hide">${esc(l.st.backend)}${l.st.model ? ' <span class="mono">' + esc(l.st.model) + '</span>' : ''}${l.st.effort ? ' <span class="mono">@' + esc(l.st.effort) + '</span>' : ''}</td>
       <td class="num opt share-hide" title="${l.coderTimeState === 'complete' ? 'coder time, all rounds' : esc(fmtCoderTime(l, true))}">${fmtCoderTime(l)}</td>
       <td class="num opt share-hide" title="review time, all rounds">${l.reviewTime ? fmtDur(l.reviewTime) : '–'}</td>
-      <td class="num opt share-hide">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || `<tr><td colspan="8" class="empty">${loops.length ? none : 'No loops yet. <a href="#/start">Start a loop</a>, or run /review-loop in Claude Code.'}</td></tr>`;
+      <td class="num opt share-hide cost">${l.usage ? fmtCost(l.cost) : '–'}</td></tr>`).join('') || `<tr><td colspan="8" class="empty">${loops.length ? none : 'No loops yet. <a href="#/start">Start a loop</a>, or run /review-loop in Claude Code.'}</td></tr>`;
     document.querySelectorAll('#loops tbody tr[data-id]').forEach(tr => tr.onclick = () => select(tr.dataset.id));
+    // A column of dashes says nothing: show Cost only when a loop tracked usage.
+    $('#loops').classList.toggle('no-cost', !rows.some(l => l.usage && l.cost != null));
   }
 
   // ── configuration panel ──────────────────────────────────────────────────
@@ -1220,8 +1361,8 @@ if (typeof module !== 'undefined') module.exports = RL;
   }
   function catalogActions(id, backend) {
     const cat = (CFG.models || {})[backend] || {};
-    return `<div class="src"><button type="button" class="mini" id="${id}-refresh" ${backend ? '' : 'disabled'}>${DATA.serve ? 'Refresh available options' : 'Load model catalog…'}</button>`
-      + (!DATA.serve ? ` <button type="button" class="mini" id="${id}-export" ${backend ? '' : 'disabled'}>Copy catalog command</button><input type="file" id="${id}-file" accept=".json,.html" hidden>` : '')
+    return `<div class="src"><button type="button" class="mini" id="${id}-refresh" title="${DATA.serve ? 'Refresh the list of models and efforts this backend offers' : 'Load the model catalog file (made by config.sh models) for this backend'}" ${backend ? '' : 'disabled'}>${DATA.serve ? 'Refresh models' : 'Load models…'}</button>`
+      + (!DATA.serve ? ` <button type="button" class="mini" id="${id}-export" title="Copy the config.sh models command that writes the catalog file" ${backend ? '' : 'disabled'}>Copy list command</button><input type="file" id="${id}-file" accept=".json,.html" hidden>` : '')
       + `<div class="catalog-status" id="${id}-status" data-catalog-backend="${esc(backend)}" role="status">${esc(!backend ? 'Select a backend to load options.' : !(cat.models || []).length ? 'No models loaded. ' + (cat.note || 'Load the backend catalog to populate the dropdowns.') : '')}</div></div>`;
   }
   function bindCatalogActions(id, backend) {
@@ -1349,7 +1490,13 @@ if (typeof module !== 'undefined') module.exports = RL;
       usage: 'Track token usage', 'dashboard.dirs': 'Folders to scan', 'dashboard.out': 'Dashboard file', 'dashboard.open': 'Open in the browser',
       'dashboard.auto': 'Regenerate when a loop ends', 'prompts.reviewer': 'Reviewer prompt file', 'prompts.reviewer_extra': 'Extra reviewer instructions',
       'prompts.coder': 'Coder brief file', 'prompts.coder_extra': 'Extra coder instructions', 'roles.reviewer': 'Reviewer presets', 'roles.coder': 'Coder presets' };
-    const LIST_EXAMPLES = { 'dashboard.dirs': 'e.g. .review-loop,archive', 'roles.reviewer': 'e.g. code-reviewer,senior-security', 'roles.coder': 'e.g. senior-qa' };
+    const KEY_HELP = { backend: `The CLI that reviews each round${(CFG.backends || []).length ? ': ' + CFG.backends.join(' or ') : ''}.`,
+      model: 'Leave on the backend default unless you need a specific model.', effort: 'How hard the reviewer model thinks; the choices depend on the model.',
+      max_rounds: 'The most review rounds before the loop stops and hands back to you.', dir: 'Where each loop\'s folder is kept, relative to the project.',
+      usage: 'Record token usage and cost for every round.', 'dashboard.dirs': 'Folders this page reads loops from, comma-separated. Empty: the loop folder.',
+      'dashboard.out': 'Where this page is written. Empty: dashboard.html in the loop folder.', 'dashboard.open': 'Open the page in your browser after generating it.',
+      'dashboard.auto': 'Regenerate this page every time a loop ends.' };
+    const LIST_EXAMPLES = { 'dashboard.out': 'e.g. docs/loops.html', 'dashboard.dirs': 'e.g. .review-loop,archive', 'roles.reviewer': 'e.g. code-reviewer,senior-security', 'roles.coder': 'e.g. senior-qa' };
     const sc = cfgState;
     const active = document.activeElement;
     const focusKey = active && active.dataset && active.dataset.key;
@@ -1364,7 +1511,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       if (k.key === 'backend') input = `<select ${ctl} ${removed ? 'disabled' : ''}>${(CFG.backends || []).map(b => `<option ${b === v ? 'selected' : ''}>${esc(b)}</option>`).join('')}${(CFG.backends || []).includes(v) ? '' : `<option value="${esc(v)}" selected>${v === '' ? 'the configured backend (hidden on this page)' : esc(v)}</option>`}</select>`;
       else if (k.key === 'model' || k.key === 'effort') input = catalogSelect(k.key, v, cat, sc.form.model, ctl, removed)
         + (k.key === 'model' ? catalogActions('cfg-model', sc.form.backend) : '');
-      else if (k.type === 'boolean') input = `<span class="check"><input type="checkbox" ${ctl} ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}> <span>${/^(1|true|yes|y|on)$/i.test(v) ? 'on' : 'off'}</span></span>`;
+      else if (k.type === 'boolean') input = `<span class="check"><input type="checkbox" ${ctl} ${/^(1|true|yes|y|on)$/i.test(v) ? 'checked' : ''} ${removed ? 'disabled' : ''}></span>`;
       else if (k.type === 'integer') input = `<input type="number" min="1" step="1" ${ctl} value="${esc(v)}" ${removed ? 'disabled' : ''}>`;
       else input = `<input type="text" ${ctl} value="${esc(v)}" placeholder="${esc(LIST_EXAMPLES[k.key] || '')}" ${removed ? 'disabled' : ''}>`;
       const inTarget = targetHas(k.key);
@@ -1375,7 +1522,7 @@ if (typeof module !== 'undefined') module.exports = RL;
         + `</span>`;
       const hidden = (CFG.show.redacted_user_config && /^(user |env )/.test(srcOf(k.key)));
       const tgt = cfgTargetFile().redacted ? ' · this file\'s contents are hidden' : inTarget ? ` · saved in this file: ${esc(tv === '' ? '(empty)' : tv)}` : ' · not in this file';
-      return `<div class="cfg-row" data-row="${k.key}"><div><label for="cfg-f-${k.key}" title="${esc(k.help)}">${esc(KEY_LABELS[k.key] || k.key)}</label> <span class="key mono">${esc(k.key)}</span> <span class="src src-note">· ${esc(srcOf(k.key))}${hidden ? ' (value hidden)' : ''}${tgt}</span></div>${input}<div class="help" id="cfg-h-${k.key}"><span class="err" data-err="${k.key}"></span>${esc(k.help)} ${tools}</div></div>`;
+      return `<div class="cfg-row" data-row="${k.key}"><div><label for="cfg-f-${k.key}" title="${esc(k.help)}">${esc(KEY_LABELS[k.key] || k.key)}</label> <span class="key mono">${esc(k.key)}</span> <span class="src src-note">· ${esc(srcOf(k.key))}${hidden ? ' (value hidden)' : ''}${tgt}</span></div>${input}<div class="help" id="cfg-h-${k.key}"><span class="err" data-err="${k.key}"></span>${esc(KEY_HELP[k.key] || k.help)} ${tools}</div></div>`;
     };
     // One card per agent role: what it runs with now, its two keys, and the
     // default template with the placeholders a replacement may use.
@@ -1408,7 +1555,6 @@ if (typeof module !== 'undefined') module.exports = RL;
       const h = () => {
         const key = el.dataset.key;
         sc.form[key] = el.type === 'checkbox' ? String(el.checked) : el.value;
-        if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off';
         const fb = $(`[data-force="${key}"]`);
         if (fb) fb.style.display = sc.form[key] === sc.initial[key] ? '' : 'none';
         if (key.startsWith('roles.')) {
@@ -1470,9 +1616,9 @@ if (typeof module !== 'undefined') module.exports = RL;
       ...Object.keys(ch.set).map(k => `${cfgLabel(k)} ${val(sc.initial[k])} → ${val(ch.set[k])}`),
       ...ch.unset.map(k => `${cfgLabel(k)} removed from this file`)].join(', ');
     const primary = DATA.serve ? $('#cfg-apply') : $('#cfg-copy');
-    if (primary && primary.classList) primary.classList.toggle('primary', n > 0);
     $('#cfg-cmd').textContent = !n ? '# no changes' : bad ? '# enter a valid provider name' : errText ? '# fix: ' + errText : RL.buildCommand(CFG.script, sc, ch);
     const ok = n > 0 && !bad && !errText;
+    if (primary && primary.classList) primary.classList.toggle('primary', ok);
     const ap = $('#cfg-apply'); if (ap) ap.disabled = !ok;
     const save = $('#cfg-save');
     const connected = cfgFileHandle && cfgFileTarget === t.path;
@@ -1490,6 +1636,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     // editable; their newer contents are reconciled after the request returns.
     const locked = cfgSaving || cfgSaveTimer !== null;
     for (const id of ['#cfg-scope-sel', '#cfg-provider', '#cfg-reset']) { const el = $(id); if (el) el.disabled = locked; }
+    if (!n && $('#cfg-reset')) $('#cfg-reset').disabled = true; // nothing to reset
     $('#cfg-grid').querySelectorAll('[data-unset], [data-force]').forEach(el => { el.disabled = cfgSaving; });
     if (ap) ap.disabled = !ok || cfgSaving;
   }
@@ -1589,9 +1736,9 @@ if (typeof module !== 'undefined') module.exports = RL;
     const eff = launchEffective;
     Object.assign(startState, { backend: eff.backend || '', model: eff.model || '', effort: eff.effort || '', max_rounds: eff.max_rounds == null ? '' : String(eff.max_rounds), usage: !!eff.usage });
     const t = $('#start-task'); t.value = startState.task; t.oninput = () => { startState.task = t.value; startUpdate(); };
-    $('#start-hint').textContent = DATA.serve
-      ? 'Describe the task and press Start: the loop is created here (start.sh), then any Claude Code session in this project is held to it by the Stop hook until the reviewer approves.'
-      : 'Describe the task; this static page shows the start.sh command to run in the project (run "dashboard.sh --serve" to start loops from here).';
+    $('#start-hint').innerHTML = DATA.serve
+      ? 'Describe the task and press Start: the loop is created here (<span class="mono">start.sh</span>), then any Claude Code session in this project is held to it by the Stop hook until the reviewer approves.'
+      : 'Describe the task, then paste the line below into Claude Code in this project. To start loops from this page instead, open it with <span class="mono">dashboard.sh --serve</span>.';
     const active = activeLoop(), banner = $('#start-banner');
     if (active) {
       // Only one loop runs per project: say so where the eye lands, link to
@@ -1601,10 +1748,14 @@ if (typeof module !== 'undefined') module.exports = RL;
         <p>Wait for it to finish, or cancel it first: run <span class="mono">/review-cancel</span> in Claude Code, or <span class="mono">${esc(RL.shq(startScript().replace(/start\.sh$/, 'cancel.sh')))}</span> in the project.</p>`;
     } else banner.style.display = 'none';
     startRenderFields();
+    // A served page starts the loop itself; a static one hands over the line
+    // for Claude Code, so copying it is the main action there.
     $('#start-actions').innerHTML = (DATA.serve ? '<button type="button" class="primary" id="start-go">Start</button>' : '')
-      + '<button type="button" id="start-copy">Copy command</button>';
+      + '<button type="button" id="start-copy">Copy for Claude Code</button>';
     $('#start-go') && ($('#start-go').onclick = startGo);
-    $('#start-copy').onclick = () => { const c = $('#start-cmd').textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => startOut('Command copied.', 'ok'), () => startOut('Could not copy. Select the command and copy it yourself.', 'err')); };
+    const copy = (sel, what) => () => { const c = $(sel).textContent; if (c && !c.startsWith('#')) navigator.clipboard?.writeText(c).then(() => startOut(what + ' copied.', 'ok'), () => startOut('Could not copy. Select the command and copy it yourself.', 'err')); };
+    $('#start-copy').onclick = copy('#start-cmd', 'Line for Claude Code');
+    $('#start-copy-sh').onclick = copy('#start-cmd-sh', 'Terminal command');
     startUpdate();
   }
   function startRenderFields() {
@@ -1618,7 +1769,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       <div class="cfg-row"><label for="start-f-model">Reviewer model</label>${catalogSelect('model', st.model, cat, st.model, 'data-start="model" id="start-f-model"', false)}${catalogActions('start-model', st.backend || eff.backend)}</div>
       <div class="cfg-row"><label for="start-f-effort">Reasoning effort</label>${catalogSelect('effort', st.effort, cat, st.model, 'data-start="effort" id="start-f-effort"', false)}</div>
       <div class="cfg-row"><label for="start-f-max_rounds">Round cap</label><input type="number" min="1" step="1" data-start="max_rounds" id="start-f-max_rounds" value="${esc(st.max_rounds)}"></div>
-      <div class="cfg-row"><label for="start-f-usage">Track token usage</label><span class="check"><input type="checkbox" data-start="usage" id="start-f-usage" ${st.usage ? 'checked' : ''}> <span>${st.usage ? 'on' : 'off'}</span></span></div>`; });
+      <div class="cfg-row"><label for="start-f-usage">Track token usage</label><span class="check"><input type="checkbox" data-start="usage" id="start-f-usage" ${st.usage ? 'checked' : ''}></span></div>`; });
     // While another loop runs, the form is read-only (see the banner).
     const locked = !!activeLoop();
     const task = $('#start-task'); if (task) task.disabled = locked;
@@ -1627,7 +1778,6 @@ if (typeof module !== 'undefined') module.exports = RL;
       const h = () => {
         const key = el.dataset.start;
         st[key] = el.type === 'checkbox' ? el.checked : el.value;
-        if (el.type === 'checkbox') el.nextElementSibling.textContent = el.checked ? 'on' : 'off';
         if (['backend', 'model'].includes(key)) {
           Object.assign(st, RL.catalogSelection((CFG.models || {})[st.backend || eff.backend] || {}, st.model, st.effort, key === 'backend'));
           startRenderFields();
@@ -1645,11 +1795,17 @@ if (typeof module !== 'undefined') module.exports = RL;
     const effErr = RL.validateValue({ key: 'effort', type: 'string' }, st.effort, CFG.backends, cat, st.model);
     const mrErr = st.max_rounds === '' ? '' : RL.validateValue({ key: 'max_rounds', type: 'integer' }, st.max_rounds, CFG.backends);
     const problem = active ? `# a loop is already active (${active.id}); cancel it first (/review-cancel)` : !st.task.trim() ? '# describe the task' : effErr ? '# fix: ' + effErr : mrErr ? '# fix: ' + mrErr : '';
-    $('#start-cmd').textContent = problem || RL.startCommand(startScript(), st, eff);
-    $('#start-summary').textContent = active ? '' : RL.startSummary(st, eff, ((CFG.show || {}).effective || {}).roles);
+    $('#start-cmd').textContent = problem || RL.slashCommand(st, eff);
+    $('#start-cmd-sh').textContent = problem || RL.startCommand(startScript(), st, eff);
+    // Role presets come from the configuration; say where to change them.
+    const roles = ((CFG.show || {}).effective || {}).roles;
+    $('#start-summary').innerHTML = active ? '' : esc(RL.startSummary(st, eff, roles)) + (roles ? ' <a href="#/config">Change them on the Configuration page</a>.' : '');
     const ok = !problem;
     const go = $('#start-go'); if (go) go.disabled = !ok || startBusy;
     $('#start-copy').disabled = !ok;
+    $('#start-copy-sh').disabled = !ok;
+    // Copying is the main action only where nothing can be started here.
+    if (!DATA.serve && $('#start-copy').classList) $('#start-copy').classList.toggle('primary', ok);
   }
   function startOut(text, cls) { const o = $('#start-out'); o.textContent = text; o.className = 'cfg-out ' + (cls || ''); }
   async function startGo() {
@@ -1685,7 +1841,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       $(nav).classList.toggle('active', on);
       if (on) $(nav).setAttribute('aria-current', 'page'); else $(nav).removeAttribute('aria-current');
     }
-    document.title = name === 'config' ? 'Review loops · configuration' : name === 'start' ? 'Review loops · start a loop' : name === 'loop' && selected ? 'Review loop · ' + (((loops.find(x => x.id === selected) || {}).task || selected).slice(0, 80)) : 'Review loops';
+    document.title = name === 'config' ? 'Review loops · configuration' : name === 'start' ? 'Review loops · start a loop' : name === 'loop' && selected ? 'Review loop · ' + (((loops.find(x => x.id === selected) || {}).title || selected).slice(0, 80)) : 'Review loops';
   }
   let cfgReady = false;
   function route() {
@@ -1703,7 +1859,7 @@ if (typeof module !== 'undefined') module.exports = RL;
     const d = $('#detail');
     if (!l) { d.innerHTML = `<div class="card"><div class="empty">No loop with id "${esc(selected || '')}" in this dashboard. <a href="#/">Back to all loops</a>.</div></div>`; return; }
     const byRound = {}; l.rounds.forEach(r => byRound[r.round] = r);
-    const verdicts = RL.roundVerdicts(l), ledger = RL.commentLedger(l.files);
+    const verdicts = RL.roundVerdicts(l), ledger = RL.commentLedger(l.files), ledgerById = Object.fromEntries(ledger.map(c => [c.id, c]));
     const vOf = n => verdicts.list.find(x => x.round === n) || {};
     const roundsHtml = l.files.map(f => {
       const r = byRound[f.round] || {}, rv = vOf(f.round);
@@ -1712,21 +1868,24 @@ if (typeof module !== 'undefined') module.exports = RL;
         r.coder_duration_s != null ? `<span title="${r.coder_time_underestimated ? 'a pause ended late: lower bound' : ''}">coder ${r.coder_time_underestimated ? '≥ ' : ''}${fmtDur(r.coder_duration_s)}</span>` : '',
         r.duration_s != null ? `review ${fmtDur(r.duration_s)}` : ''].filter(Boolean).join(' · ');
       const cost = [r.coder, r.reviewer].some(u => u && u.cost_usd != null) ? ((r.coder || {}).cost_usd || 0) + ((r.reviewer || {}).cost_usd || 0) : null;
-      return `<div class="round">
-        <div class="round-head"><h3>Round ${f.round} ${rv.verdict ? `<span class="chip ${rv.verdict === 'approved' ? 'good' : 'serious'}"><i></i>${esc(rv.verdict.replace('_', ' '))}</span>` : ''}</h3>
-          ${meta && !SHARE ? `<span class="round-meta">${meta}</span>` : ''}${rv.source === 'file' ? '<span class="round-meta">verdict read from the review file</span>' : ''}</div>
+      // The ledger and the verdict band are the record; each round is its
+      // source, folded behind one line: verdict, counts, times, what it raised.
+      const raised = ledger.filter(c => c.raised && c.round === f.round).map(c => c.id);
+      return `<details class="round" id="round-${f.round}">
+        <summary class="round-head"><h3>Round ${f.round} ${rv.verdict ? `<span class="chip ${rv.verdict === 'approved' ? 'good' : 'serious'}"><i></i>${esc(rv.verdict.replace('_', ' '))}</span>` : ''}</h3>
+          ${meta && !SHARE ? `<span class="round-meta">${meta}</span>` : ''}${raised.length ? `<span class="round-meta">raised <span class="mono">${raised.map(esc).join(', ')}</span></span>` : ''}${rv.source === 'file' ? '<span class="round-meta">verdict read from the review file</span>' : ''}</summary>
         <div class="pair">
           <div class="doc coder" role="region" aria-label="Round ${f.round} coder"><h4 class="who">Coder</h4>${coderPane(f)}</div>
-          <div class="doc reviewer" role="region" aria-label="Round ${f.round} reviewer"><h4 class="who">Reviewer</h4>${reviewerPane(f)}</div>
+          <div class="doc reviewer" role="region" aria-label="Round ${f.round} reviewer"><h4 class="who">Reviewer</h4>${reviewerPane(f, ledgerById)}</div>
         </div>
         ${(r.coder || r.reviewer) && !SHARE ? `<details class="usage"><summary>Token usage${cost != null ? ' · ' + fmtCost(cost) : ''}</summary><div class="scroll-x"><table class="usage-table"><thead><tr><th>Agent</th><th class="num">Input</th><th class="num">Cached</th><th class="num">Cache write</th><th class="num">Output</th><th class="num">Reasoning</th><th class="num">Cost</th></tr></thead><tbody>${usageRows('coder (' + esc((r.coder || {}).model || '–') + ')', r.coder && { ...r.coder, any: true })}${usageRows('reviewer (' + esc((r.reviewer || {}).model || '–') + ')', r.reviewer && { ...r.reviewer, any: true })}</tbody></table></div></details>` : ''}
-      </div>`;
+      </details>`;
     }).join('');
-    const recap = RL.loopRecap(l, ledger);
     d.innerHTML = `<div class="card">
-      <div class="detail-head"><h2>${esc(l.task)}</h2></div>
-      <p class="verdict-line">${chip(l.outcome)} <span>${esc(RL.verdictDetail(l))}</span></p>
-      ${nextHtml(l)}
+      <div class="detail-head"><h2>${esc(l.title || l.id)}</h2></div>
+      ${l.task.length > l.title.length ? `<p class="task-full">${esc(l.task)}</p>` : ''}
+      ${RL.provenance(l.st) ? `<p class="provenance">${esc(RL.provenance(l.st))}</p>` : ''}
+      ${verdictBand(l, ledger)}
       ${verdicts.mismatch ? `<p class="record-note">The loop's record (state.json) lists ${verdicts.recorded} round${verdicts.recorded === 1 ? '' : 's'}, and ${verdicts.onDisk} review file${verdicts.onDisk === 1 ? ' is' : 's are'} on disk. The rounds below come from the files.</p>` : ''}
       ${SHARE ? PRIMER : ''}
       ${ledgerHtml(l)}
@@ -1739,12 +1898,18 @@ if (typeof module !== 'undefined') module.exports = RL;
         ${l.st.prompts ? `<span>reviewer prompt <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'reviewer'))}</b></span><span>coder brief <b class="mono">${esc(RL.promptLabel(l.st.prompts, 'coder'))}</b></span>` : ''}
         ${l.st.roles ? `<span>reviewer presets <b class="mono">${esc(RL.rolesLabel(l.st.roles, 'reviewer'))}</b></span><span>coder presets <b class="mono">${esc(RL.rolesLabel(l.st.roles, 'coder'))}</b></span>` : ''}</div></details>
       ${roundsHtml || `<div class="empty">No rounds yet.${l.st.active && !SHARE ? ' The coder is working on round 1; the first review appears here when it finishes (regenerate the page, or use a served page, to see it).' : ''}</div>`}
-      ${roundsHtml ? `<div class="end-recap"><p class="verdict-line">${chip(l.outcome)} <span>${esc(recap)}</span> <a href="#/">All loops</a></p>${nextHtml(l)}</div>` : ''}
+      ${roundsHtml ? verdictBand(l, ledger, true) : ''}
       ${l.summary ? `<details class="summary-file"><summary>Loop summary file (summary.md)</summary><div class="doc" role="region" aria-label="Loop summary"><div class="md">${md(l.summary)}</div></div></details>` : ''}
     </div>`;
     linkComments(d, l);
     // A pane that scrolls must be reachable by keyboard to scroll it.
     d.querySelectorAll('.doc').forEach(p => { if (p.scrollHeight > p.clientHeight + 1 || p.scrollWidth > p.clientWidth + 1) p.tabIndex = 0; });
+  }
+  // "round 4", "rounds 4–5", "rounds 2, 4 and 6".
+  function roundList(rs) {
+    if (rs.length === 1) return 'round ' + rs[0];
+    const run = rs.every((r, k) => !k || r === rs[k - 1] + 1);
+    return 'rounds ' + (run ? `${rs[0]}–${rs[rs.length - 1]}` : rs.slice(0, -1).join(', ') + ' and ' + rs[rs.length - 1]);
   }
   // The ledger: each comment once, with what the coder and the reviewer said
   // about it in later rounds, and where it stands now.
@@ -1756,14 +1921,15 @@ if (typeof module !== 'undefined') module.exports = RL;
     const say = (who, s, extra) => `${who} <b>${esc(s)}</b>${extra ? ': ' + inl(extra) : ''}`;
     const rows = list.map(c => {
       const [cls, label] = RL.commentStatus(c, !!l.st.active);
-      const steps = c.steps.map(s => `<li>Round ${s.round}: ${[s.coder && say('coder', s.coder.status, s.coder.note), s.reviewer && say('reviewer', s.reviewer.status.replace('-', ', '), s.reviewer.reason)].filter(Boolean).join(' · ')}</li>`).join('');
-      const where = c.file ? `<span class="mono">${esc(c.file)}${c.line ? ':' + esc(c.line) : ''}</span>` : '';
-      return `<tr id="ledger-${esc(c.id)}" role="row">
+      const steps = c.steps.map(s => `<li>Round ${s.round}: ${[s.coder && say('coder', s.coder.status, s.coder.note), s.reviewer && say('reviewer', s.reviewer.status.replace('-', ', '), s.reviewer.reason)].filter(Boolean).join(' · ')}${RL.isDisputed(s) ? ' <span class="chip serious"><i></i>disputed</span>' : ''}</li>`).join('')
+        + (c.reconfirmed.length ? `<li class="again">Same answer and grade in ${roundList(c.reconfirmed)}</li>` : '');
+      const where = c.file ? fileRef(c.file, c.line) : '';
+      return `<tr id="ledger-${esc(c.id)}" role="row" tabindex="-1">
         <td class="what" role="cell"><span class="cid">${esc(c.id)}</span> <span class="meta">${[c.severity, c.blocking ? 'blocking' : (c.optional ? 'optional' : 'non-blocking')].filter(Boolean).map(esc).join(' · ')}${where ? ' · ' + where : ''}</span>
           ${c.description ? `<div class="md">${inl(c.description)}</div>` : ''}${c.fix ? `<div class="fix md">Suggested fix: ${inl(c.fix)}</div>` : ''}</td>
         <td class="num opt raised" role="cell">${c.raised ? 'Round ' + c.round : '–'}</td>
         <td class="trail" role="cell">${steps ? `<ul class="steps md">${steps}</ul>` : '<span class="meta">no later round</span>'}</td>
-        <td class="st" role="cell"><span class="chip ${cls}"><i></i>${esc(label)}</span></td></tr>`;
+        <td class="st" role="cell"><span class="chip ${cls}"><i></i>${esc(label)}</span>${c.since && c.status !== 'open' ? `<span class="since">since round ${c.since}</span>` : ''}</td></tr>`;
     }).join('');
     return `<section class="ledger" aria-labelledby="ledger-h"><h3 id="ledger-h">Comments</h3><p class="lead">${esc(RL.ledgerSummary(list))}</p>
       ${list.length ? `<table role="table"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Comment</th><th scope="col" role="columnheader" class="num opt">Raised</th><th scope="col" role="columnheader">What happened</th><th scope="col" role="columnheader">Status</th></tr></thead><tbody role="rowgroup">${rows}</tbody></table>` : ''}</section>`;
@@ -1798,6 +1964,13 @@ if (typeof module !== 'undefined') module.exports = RL;
     d.addEventListener('mouseleave', () => mark('', false));
     d.addEventListener('focusout', () => mark('', false));
     d.addEventListener('click', e => {
+      const back = e.target.closest && e.target.closest('[data-ledger]');
+      if (back) {
+        e.preventDefault();
+        const row = document.getElementById('ledger-' + back.dataset.ledger);
+        if (row) { row.scrollIntoView({ block: 'center' }); row.focus({ preventScroll: true }); }
+        return;
+      }
       const copy = e.target.closest && e.target.closest('[data-copy]');
       if (copy) {
         navigator.clipboard?.writeText(copy.dataset.copy).then(() => { copy.textContent = 'Copied'; }, () => { copy.textContent = 'Select and copy'; });
@@ -1806,6 +1979,7 @@ if (typeof module !== 'undefined') module.exports = RL;
       const a = e.target.closest && e.target.closest('a.cid'); if (!a) return;
       e.preventDefault();
       const at = d.querySelector(`[data-cid-at="${a.dataset.cid}"]`); if (!at) return;
+      for (let x = at.parentElement; x && x !== d; x = x.parentElement) if (x.tagName === 'DETAILS') x.open = true;
       d.querySelectorAll('.cid-target').forEach(x => x.classList.remove('cid-target'));
       at.classList.add('cid-target'); at.scrollIntoView({ block: 'center' }); at.focus({ preventScroll: true });
     });

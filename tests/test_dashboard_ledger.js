@@ -113,14 +113,40 @@ const stray = RL.commentLedger([{ round: 2, coder: '| R1-C9 | fixed | ok |', rev
 eq([stray[0].id, stray[0].raised, stray[0].round], ['R1-C9', false, 1]);
 
 assert.equal(RL.ledgerSummary([]), 'No comments were raised.');
-assert.equal(RL.ledgerSummary(ledger), '4 comments, 2 blocking. Still open or unresolved: R2-C1.');
-assert.equal(RL.ledgerSummary(ledger.slice(0, 3)), '3 comments, 1 blocking. All blocking comments were resolved.');
+assert.equal(RL.ledgerSummary(ledger), '4 comments, 2 blocking, 1 disputed.', 'the ledger head counts (disputes too); the verdict band says where blocking comments stand');
 assert.equal(RL.ledgerSummary([c2]), '1 comment, 0 blocking.');
-assert.equal(RL.ledgerSummary([{ ...c1, status: 'open' }, { ...c4 }]), '2 comments, 2 blocking. 2 still open or unresolved: R1-C1, R2-C1.');
+// Where the blocking comments stand, for the verdict band (IDs become links).
+eq(RL.blockingState(ledger), { text: 'Blocking comment still open or unresolved:', open: ['R2-C1'] });
+eq(RL.blockingState(ledger.slice(0, 3)), { text: 'All blocking comments were resolved.', open: [] });
+eq(RL.blockingState([c2]), { text: 'No blocking comments.', open: [] });
+eq(RL.blockingState([]), { text: '', open: [] });
+eq(RL.blockingState([{ ...c1, status: 'open' }, { ...c4 }]), { text: 'Blocking comments still open or unresolved:', open: ['R1-C1', 'R2-C1'] });
+// since: the round whose review first gave the current status.
+eq([c1.since, c3.since, c4.since], [2, 2, null]);
+assert.equal(later[2].since, 3, 'a changed grade moves since');
+// A coder that repeats its answer while the grade stays is "re-confirmed", not a new step.
+const again = RL.commentLedger([{ round: 1, review: review1 }, { round: 2, coder: coder2, review: review2 },
+  { round: 3, coder: '| R1-C1 | fixed | added the check and a test |', review: '## Previous comments\n\n- R1-C1: resolved\n\nVERDICT: approved' },
+  { round: 4, coder: '| R1-C1 | fixed | added the check and a test |', review: '## Previous comments\n\n- R1-C1: resolved\n\nVERDICT: approved' }]);
+eq(again[0].steps.map(x => x.round), [2], 'repeated answer and grade add no step');
+eq(again[0].reconfirmed, [3, 4]);
+assert.equal(again[0].since, 2, 'the repeats do not move since');
+// An answer the next review has not graded yet (the loop is on that round) is
+// news, not a repeat, even when it says the same as the last one.
+const pending = RL.commentLedger([{ round: 1, review: review1 }, { round: 2, coder: coder2, review: review2 },
+  { round: 3, coder: '| R1-C1 | fixed | added the check and a test |' }]);
+eq(pending[0].steps.map(x => x.round), [2, 3], 'an ungraded repeat of the answer stays in the trail');
+eq(pending[0].reconfirmed, [], 'and is not called "same answer and grade"');
+const reasons = RL.commentLedger([{ round: 1, review: review1 }, { round: 2, coder: coder2, review: review2 },
+  { round: 3, review: '## Previous comments\n\n- R1-C3: unresolved — now the README is wrong too\n\nVERDICT: changes_requested' }]);
+eq(reasons[2].steps.map(x => x.round), [2, 3], 'the same grade with a new reason stays in the trail');
+const settled = RL.commentLedger([{ round: 1, review: review1 }, { round: 2, coder: coder2, review: review2 },
+  { round: 3, review: '## Previous comments\n\n- R1-C1: resolved — the check is there, re-worded\n\nVERDICT: approved' }]);
+eq(settled[0].steps.map(x => x.round), [2], 'a settled grade re-worded in a later round adds no step');
 
 // The loop view: the ledger sits above the rounds, IDs become links that
 // never change the hash, and each agent's pane carries its voice colour.
-assert.match(html, /<p class="verdict-line">\$\{chip\(l\.outcome\)\} <span>\$\{esc\(RL\.verdictDetail\(l\)\)\}<\/span><\/p>[\s\S]*?\$\{ledgerHtml\(l\)\}[\s\S]*?<details class="run-details">[\s\S]*?\$\{roundsHtml/, 'verdict line, then the ledger, then folded run details, then the rounds');
+assert.match(html, /\$\{verdictBand\(l, ledger\)\}[\s\S]*?\$\{ledgerHtml\(l\)\}[\s\S]*?<details class="run-details">[\s\S]*?\$\{roundsHtml/, 'verdict line, then the ledger, then folded run details, then the rounds');
 assert.match(html, /<details class="summary-file"><summary>Loop summary file \(summary\.md\)<\/summary>/, 'summary.md is folded at the end');
 
 // Verdicts come from state.json, or from the review file when a round has no record.
@@ -137,11 +163,15 @@ assert.equal(RL.roundVerdicts(loopOf([{ round: 1, review: review1 }], [{ round: 
 assert.equal(RL.roundProgress(loopOf([], [], { active: true, round: 1 })), 'round 1 in progress (round cap 5)');
 assert.equal(RL.roundProgress(loopOf([{ round: 1, review: review1 }], [{ round: 1 }], {})), '1 round (round cap 5)');
 assert.equal(RL.verdictDetail(mixed), 'In round 2 (round cap 5).', 'the detail never repeats the outcome chip');
-assert.equal(RL.loopRecap(mixed, ledger), 'In round 2 (round cap 5). 4 comments, 2 blocking. Still open or unresolved: R2-C1.');
-assert.equal(RL.loopRecap(loopOf([], [], { active: true, round: 1, outcome: 'active' }), []), 'Round 1 is in progress (round cap 5).');
-assert.equal(RL.loopRecap(loopOf([{ round: 1, review: review1 }], [{ round: 1, verdict: 'changes_requested' }], { outcome: 'max_rounds_reached', max_rounds: 1 }), []),
+assert.equal(RL.verdictDetail(loopOf([], [], { active: true, round: 1, outcome: 'active' })), 'Round 1 is in progress (round cap 5).');
+assert.equal(RL.verdictDetail(loopOf([{ round: 1, review: review1 }], [{ round: 1, verdict: 'changes_requested' }], { outcome: 'max_rounds_reached', max_rounds: 1 })),
   'Changes were still requested after 1 round (round cap 1).');
-assert.equal(RL.loopRecap(loopOf([], [], { outcome: 'cancelled' }), []), 'After 0 rounds.');
+assert.equal(RL.verdictDetail(loopOf([], [], { outcome: 'cancelled' })), 'After 0 rounds.');
+// The page opens and ends on the verdict band: the outcome in headline type
+// behind its status dot, the detail, and links to blocking comments still open.
+assert.match(html, /<p class="verdict-main"><span class="dot \$\{cls\}" aria-hidden="true"><\/span>\$\{esc\(label\)\}<\/p>/);
+assert.match(html, /\$\{roundsHtml \? verdictBand\(l, ledger, true\) : ''\}/, 'the page ends on the same band');
+assert.match(html, /\.verdict-main \{[^}]*font-size: 20px; font-weight: 700;/);
 assert.match(html, /<div class="doc coder" role="region"/); assert.match(html, /<div class="doc reviewer" role="region"/);
 assert.match(html, /\.doc\.coder \{ border-color: var\(--s1\);/, 'the coder pane is outlined in coder blue');
 assert.match(html, /\.doc\.reviewer \{ border-color: var\(--s2\);/, 'the reviewer pane is outlined in reviewer orange');
@@ -218,4 +248,46 @@ assert.match(html, /\.ledger \.lead \{[^}]*text-wrap: pretty;/, 'the ledger lead
   assert.match(html, /rawFile\('Review file', f\.review\)/, 'the raw review stays one click away');
   assert.match(html, /n && !SHARE \? `<p class="next-step">/, 'next steps never appear on a shared page');
   assert.match(html, /max_rounds_reached: \['serious', 'Round cap reached'\]/, 'the chip names the round cap');
+}
+
+// Threads, disputes, provenance and the landing point of a followed link.
+{
+  assert.equal(RL.isDisputed({ coder: { status: 'fixed' }, reviewer: { status: 'unresolved' } }), true, 'fixed but unresolved is disputed');
+  assert.equal(RL.isDisputed({ coder: { status: 'declined' }, reviewer: { status: 'declined-rejected' } }), true, 'a rejected decline is disputed');
+  assert.equal(RL.isDisputed({ coder: { status: 'fixed' }, reviewer: { status: 'resolved' } }), false);
+  assert.equal(RL.isDisputed({ coder: { status: 'declined' }, reviewer: { status: 'declined-accepted' } }), false);
+  assert.equal(RL.isDisputed({ reviewer: { status: 'unresolved' } }), false, 'no answer, no dispute');
+  assert.equal(RL.provenance({ backend: 'codex', model: 'gpt-x', effort: 'high', branch: 'feat/greet', base_ref: '0123456789abcdef' }),
+    'Reviewed by codex (gpt-x, high effort) · branch feat/greet · base 0123456');
+  assert.equal(RL.provenance({ backend: 'fake', base_ref: '4b825dc642cb6eb9a060e54bf8d69288fbee4904' }), 'Reviewed by fake', 'the empty-tree base is not shown');
+  assert.equal(RL.provenance({}), '');
+  assert.match(html, /\.doc \.rc:focus:not\(\.cid-target\) \{ outline: none; \}/, 'a followed link keeps its focus outline');
+  assert.doesNotMatch(html, /\.doc \.rc:focus \{ outline: none; \}/, 'no rule hides the landing point');
+  assert.match(html, /data-ledger="\$\{esc\(c\.id\)\}">Back to the comment list<\/a>/, 'each comment links back to its ledger row');
+  // Each comment's history has one home, the ledger: the reviewer pane no
+  // longer repeats it, and later rounds show answers and grades as a strip
+  // with the text folded below.
+  assert.doesNotMatch(html, /<ul class="thread">/, 'the reviewer pane does not retell the history');
+  assert.match(html, /RL\.isDisputed\(s\) \? ' <span class="chip serious"><i><\/i>disputed<\/span>'/, 'disputes are marked in the ledger');
+  assert.match(html, /<ul class="strip">\$\{parts\.statuses\.map\(g => `<li><span class="cid">\$\{esc\(g\.id\)\}<\/span> \$\{grade\(g\.status\)\}<\/li>`\)/, 'earlier comments are a strip of grades');
+  assert.match(html, /<summary>What each was, and the reasons<\/summary>[\s\S]{0,200}\$\{what\(g\.id\)\}\$\{g\.reason \? `<div class="reason md">Reason: /, 'what each was, then its reason on its own line');
+  assert.match(html, /<details class="full"><summary>The coder's notes<\/summary>/, 'the coder\'s notes fold below its strip');
+  assert.match(html, /where = x\.file \? fileRef\(x\.file, x\.line\)/, 'a structured file field shows as name:line');
+  assert.match(html, /where = c\.file \? fileRef\(c\.file, c\.line\)/, 'in the ledger too');
+  // Every round folds; a followed link opens the round that holds its target.
+  assert.match(html, /if \(x\.tagName === 'DETAILS'\) x\.open = true;/, 'following an ID opens its folded round');
+  // Snippets: whole words, never ending inside a code span.
+  assert.equal(RL.snippet('short text'), 'short text');
+  assert.equal(RL.snippet('one two three four five six', 14), 'one two three…');
+  assert.equal(RL.snippet('a `show.files` call that runs much longer than this', 12), 'a…', 'a cut inside a code span backs off before it');
+  // Loop names: the first sentence of the first line, capitalised.
+  assert.equal(RL.loopTitle('allow to select models. Also the effort'), 'Allow to select models.');
+  assert.equal(RL.loopTitle('P2 — A missing coder prompt file blocks approval. [review.sh (line 77)](x)'), 'P2 — A missing coder prompt file blocks approval.');
+  assert.equal(RL.loopTitle('fix it. then more'), 'Fix it. then more', 'a first sentence too short to name the loop is kept whole');
+  assert.equal(RL.loopTitle('line one\nline two'), 'Line one');
+  assert.equal(RL.loopTitle(''), '');
+  assert.match(html, /\$\{l\.task\.length > l\.title\.length \? `<p class="task-full">/, 'the full task shows only when it says more than the title');
+  assert.match(html, /aria-label="Copy \$\{esc\(n\.cmd\)\}">Copy<\/button>/, 'the copy button names what it copies');
+  assert.match(html, /<dl class="primer" aria-label="How to read this page">/, 'the primer is a legend');
+  assert.match(html, /#loops \.chip \{ white-space: normal; \}/, 'loop-list chips wrap on phones');
 }

@@ -154,8 +154,11 @@ case "$BACKEND" in
 esac
 
 # Git base reference
-BASE_REF="null"
+BASE_REF="null" BRANCH=""
 if git -C "$ROOT" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  # The branch the change is on, for the record: empty on a detached HEAD, and
+  # known before the first commit too (HEAD names its branch from git init).
+  BRANCH=$(git -C "$ROOT" symbolic-ref --short -q HEAD 2>/dev/null || true)
   if BASE_SHA=$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null); then
     BASE_REF="\"$BASE_SHA\""
   else
@@ -178,9 +181,9 @@ printf '%s\n' "$TASK" > "$LOOP_DIR/task.md"
 
 jq -n \
   --arg id "$LOOP_ID" --arg be "$BACKEND" --arg model "$MODEL" --arg effort "$EFFORT" --argjson mr "$MAX_ROUNDS" \
-  --arg dir "$DIR" --argjson base "$BASE_REF" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" --argjson prompts "$PROMPTS" --argjson roles "$ROLES" \
+  --arg dir "$DIR" --argjson base "$BASE_REF" --arg branch "$BRANCH" --arg root "$ROOT" --arg t "$(rl_now)" --argjson e "$(rl_epoch)" --arg sid "$SESSION_ID" --argjson usage "$USAGE" --argjson prompts "$PROMPTS" --argjson roles "$ROLES" \
   '{loop_id: $id, protocol_version: 2, active: true, phase: "coding", round: 1, max_rounds: $mr,
-    backend: $be, model: $model, effort: $effort, base_ref: $base, dir: $dir, root: $root, usage: $usage, prompts: $prompts, roles: $roles,
+    backend: $be, model: $model, effort: $effort, base_ref: $base, branch: (if $branch == "" then null else $branch end), dir: $dir, root: $root, usage: $usage, prompts: $prompts, roles: $roles,
     session_id: (if $sid == "" then null else $sid end), started_at: $t, retries: 0, verdict: null, rounds: [],
     round_started_at: $t, round_started_epoch: $e, paused_s: 0, failed_review_s: 0}' > "$LOOP_DIR/state.json"
 

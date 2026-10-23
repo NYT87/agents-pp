@@ -200,7 +200,7 @@ These four colours appear as 8px dots inside chips. Text in a status colour uses
 **Character:** The platform's own UI font, set small and dense like a native tool. Monospace marks anything that is literally from the files: comment IDs, paths, commands and code.
 
 ### Hierarchy
-- **Page title** (700, 20px): the dashboard name in the header. Used once.
+- **Page title** (700, 20px): the dashboard name in the header, and the outcome in a loop's verdict band (the answer the page exists to give).
 - **Metric** (600, 26px): the value in each stat tile. The largest type on the page, because the numbers matter most.
 - **Headline** (700, 16px): the loop name in the loop detail view.
 - **Title** (700, 14px): card and round headings, role card names.
@@ -208,7 +208,7 @@ These four colours appear as 8px dots inside chips. Text in a status colour uses
 - **Body dense** (400, 13px): tables, filters, breadcrumbs, key-value rows, config labels.
 - **Label** (400, 12px): tile labels, hints, legends, chips, table headers (500 weight), rendered markdown inside document panes.
 - **Eyebrow** (400, 11px, 0.04em tracking, uppercase): "CODER" / "REVIEWER" above document panes, config group headers (12px there).
-- **Mono** (12px): comment IDs, paths, commands, code blocks (11px in template previews).
+- **Mono** (12px): comment IDs, paths, commands, code blocks (11px in template previews). A Markdown link to a file, and a review's structured `file:` field, both render as a mono file reference, `name:line`, with the path on hover; only web URLs become links.
 
 ### Named Rules
 **The Tabular Numbers Rule.** Every numeric column and chart tick uses `font-variant-numeric: tabular-nums` and is right-aligned in tables.
@@ -249,7 +249,7 @@ Plain and low-key; a button looks like a control, not a call to action.
 - **Shape:** 6px corners, 1px hairline border.
 - **Default:** stone surface, ink text, 4px 10px padding, inherits the body font.
 - **Hover:** hover-wash background. No movement, no transition.
-- **Primary (save/start):** filled ink action with on-action text, no border, 0.9 opacity on hover, 0.5 opacity when disabled.
+- **Primary (save/start):** filled ink action with on-action text, no border, 0.9 opacity on hover. A disabled primary falls back to the plain button at 0.5 opacity: filled ink always means "this will run".
 - **Focus:** a 2px ink action outline, offset 2px, on `:focus-visible`.
 - **Mini:** 11px text, 0 6px padding, for per-field tools (reset, remove).
 
@@ -269,11 +269,16 @@ Plain and low-key; a button looks like a control, not a call to action.
 ### Home
 - **Order:** on every page the loop list leads, and the stat tiles and charts fold into a closed "Stats across these loops" disclosure below it.
 - **Dates:** chart labels drop the date when every loop shares it, and loop-list dates are in the body font, not mono.
+- **Loop names:** a loop is named by its task's first sentence (first line, capitalised): the list row (wrapping to two lines before it is cut), the loop heading, chart labels, tooltips and the tab title. The full task stays in the row's hover title and, when it says more, in a 13px Ink Secondary line under the loop heading.
+- **Empty charts** drop their legend.
 
 ### Configuration: simple and detailed
 - **Save bar:** sticky at the bottom of the card, with a 13px summary of what will change ("1 change: Round cap 5 → 7"), the actions and the command. The main action (Copy command on a static page, Save now on a served one) turns ink once there is a change.
 - **Edited fields:** an edited field's key gains "· edited".
 - **Labels:** each field is labelled for people ("Reviewer backend", "Round cap", "Extra coder instructions"), with its key beside the label in 12px muted mono for the CLI and the file.
+- **Help lines:** in people's words ("The most review rounds before the loop stops and hands back to you."); `config.sh`'s own key help stays as the label's hover title.
+- **Checkboxes:** the label above names them; no "on" / "off" text beside them.
+- **Model list tools:** "Load models…" / "Copy list command" (static) or "Refresh models" (served), mini buttons on one row under the model select, their full meaning in the title.
 - **Hidden values:** a select whose value is hidden on this page names it ("the configured backend (hidden on this page)") instead of showing a blank option.
 - **Presets and intro:** the preset pickers fold behind "Change reviewer presets" and "Change coder presets". The intro is one sentence plus a "How saving works here" disclosure, underlined so it reads as clickable.
 - **The switch:** reads "Show where values come from", or "Hide…" when on, and fills ink when pressed.
@@ -288,7 +293,8 @@ Plain and low-key; a button looks like a control, not a call to action.
 
 ### Start a loop: protection and confirmation
 - **Active-loop banner:** when a loop is already running in the project, it's the first thing in the card, a plain box in the page tone with a 1px ink border. It isn't an alert, because it describes a standing state. It names and links the running loop with its round, and gives the cancel command. The whole form is disabled, and the command block names the active loop.
-- **Summary line:** above the actions, a 13px Ink Secondary sentence says what Start will run: backend, model, effort, round cap, usage and role presets.
+- **Summary line:** above the actions, a 13px Ink Secondary sentence says what Start will run: backend, model, effort, round cap, usage and role presets, with a link to change the presets on the Configuration page (Start has no preset controls of its own).
+- **Output on a static page:** the main output is a `/review-loop …` line for Claude Code, where the user already is, and **Copy for Claude Code** is the ink primary once the form is valid. The `bash …/start.sh` command sits folded below under "Or run it in a terminal, in the project". A served page keeps **Start** as its primary.
 - **Confirmation:** after a successful start the page does not reload. A "Loop started" panel takes focus, gives the next step (open Claude Code in the project), and offers **Open the loop**. Start stays disabled until then.
 - **Disabled controls:** every disabled control is drawn at 0.5 opacity.
 
@@ -298,7 +304,7 @@ Plain and low-key; a button looks like a control, not a call to action.
 - **For the recipient:** a shared page is for someone who reads the record and can neither start nor configure loops.
 - **Hidden:** the Start and Configuration nav buttons. Their routes return to the loop list.
 - **Header:** names the project ("repo · shared <date>"), not a path.
-- **Primer:** each loop page opens with a short primer (13px Ink Secondary, 62ch, inset in the page tone) explaining IDs, fixed or declined answers, the reviewer's grades and blocking.
+- **Primer:** a three-item legend (`<dl>`, in fluid 200px columns, inset in the page tone, 12px), shown on a shared page's home and loop pages. Its items: "Comment IDs", "Answers and grades" (including disputed) and "Blocking and the round cap".
 
 ### Inputs / Fields
 - **Style:** stone surface, hairline border, 6px corners, 5px 8px padding, full width in config rows. The task textarea is at least 72px tall and resizes vertically.
@@ -313,15 +319,20 @@ Plain and low-key; a button looks like a control, not a call to action.
 - Full width, 13px. Cells have 8px 10px padding and a gridline rule beneath.
 - Headers are muted, 12px, weight 500. Number columns are right-aligned with tabular numerals.
 - Rows are clickable. They show the hover wash, and the selected row adds a hairline outline.
+- A column that would show only dashes is hidden: the loop list's Cost appears only when a loop tracked usage.
 
 ### Signature: Round Pair
-The two voices side by side. Each round opens with a 14px heading holding its verdict chip, the round's status; beside it, outside the heading, a 12px Ink Secondary line gives the blocking count and the coder and review times as plain text, since chips are for status, not data. The round then shows the coder's and reviewer's documents in two fluid columns. Each document pane is inset to the page tone with 8px corners, a 520px scroll limit and rendered markdown, and carries its author's voice: its 1px hairline is drawn in that voice colour at 55% strength, and its uppercase eyebrow is led by an 8px dot in the full voice colour. The voice is never a thick stripe: a heavier coloured edge on a rounded pane is the accent-stripe cliché the Hairline rule rules out. Comment IDs (`R1-C2`) appear as small monospace badges with a hairline border. Every mention links to the heading where the comment was raised, and pointing at or focusing one outlines every mention of the same ID in ink. Links never change the hash, because the page is hash-routed; they scroll to the comment and move focus there. Per-round token usage sits below the pair in a closed disclosure ("Token usage · $0.0100"), so the table never breaks the reading rhythm of the exchange.
+The two voices side by side. The ledger and the verdict band are the record; the rounds are its source, so **every round is folded** (`<details>`) behind its summary row: a small CSS caret, the 14px heading holding its verdict chip (the round's status), then, outside the heading, a 12px Ink Secondary line with the blocking count and the coder and review times as plain text (chips are for status, not data) and the IDs the round raised in mono. Following an ID link opens the round that holds the comment. An open round shows the coder's and reviewer's documents in two fluid columns. Each document pane is inset to the page tone with 8px corners and rendered markdown, and grows to its content (no inner scroll, so nothing reads as cut off), with prose held to 75ch, and carries its author's voice: its 1px hairline is drawn in that voice colour at 55% strength, and its uppercase eyebrow is led by an 8px dot in the full voice colour. The voice is never a thick stripe: a heavier coloured edge on a rounded pane is the accent-stripe cliché the Hairline rule rules out. Comment IDs (`R1-C2`) appear as small monospace badges with a hairline border. Every mention links to the heading where the comment was raised, and pointing at or focusing one outlines every mention of the same ID in ink. Links never change the hash, because the page is hash-routed; they scroll to the comment and move focus there. Per-round token usage sits below the pair in a closed disclosure ("Token usage · $0.0100"), so the table never breaks the reading rhythm of the exchange.
 
-### Signature: Verdict Line
-- **Placement:** directly under a loop's title, before anything else. It holds the outcome chip and one 14px sentence that adds what the chip doesn't say, such as "In round 3 (round cap 5)." or "Changes were still requested after 2 rounds (round cap 2)." It never repeats the outcome.
+### Provenance
+Under a loop's title, a 13px Ink Secondary line names who reviewed and against what: "Reviewed by codex (gpt-x, high effort) · branch feat/greet · base 15b4abd". The independent reviewer is the product's point, so it's never folded away. The base is hidden when it's the empty tree of a repository with no commits.
+
+### Signature: Verdict Band
+- **Placement:** directly under a loop's title and provenance, before anything else, between two gridline hairlines. It answers the reader's first question.
+- **Anatomy:** the outcome in page-title type (20px, 700) behind a 10px status dot (colour stays on the dot); one 14px sentence that adds what the outcome doesn't say, such as "In round 3 (round cap 5)." or "Changes were still requested after 2 rounds (round cap 2).", followed by where the blocking comments stand ("All blocking comments were resolved.", or "Blocking comment still open or unresolved:" and the IDs as linked badges); then the next step, if any. It never repeats the outcome.
 - **Terms:** the round cap is always called that, including the outcome chip ("Round cap reached").
-- **Order below it:** the primer on a shared page, the comment ledger (its lead sentence carries the comment counts), a closed **Run details** disclosure (id, reviewer, rounds, times, cost, folder, prompts, presets), then the rounds.
-- **The end:** the page closes on the same line with the comment counts added, then the raw `summary.md` in a closed disclosure.
+- **Order below it:** the primer on a shared page, the comment ledger (its lead sentence carries only the counts; where blocking comments stand is the band's), a closed **Run details** disclosure (id, reviewer, rounds, times, cost, folder, prompts, presets), then the folded rounds.
+- **The end:** the page closes on the same band (top hairline only) with an "All loops" link, then the raw `summary.md` in a closed disclosure.
 - **Files are the truth:**
   - When `state.json` records fewer rounds than there are review files, a 13px Ink Secondary note says so, with both counts.
   - A round without a record takes its chip from its review file (front matter or final `VERDICT:` line) and says "verdict read from the review file".
@@ -331,28 +342,33 @@ The two voices side by side. Each round opens with a 14px heading holding its ve
 ### Signature: Round Panes as an Exchange
 - **Labels:** each pane is named by an h4 ("CODER" / "REVIEWER", the eyebrow style with its voice dot), so heading navigation says where each voice starts.
 - **The reviewer pane** renders a structured review as its parts, under 13px h5 headings:
-  - "Earlier comments": each ID with the grade chip and the reason.
+  - "Earlier comments": a strip of ID badge + grade chip, then a closed "What each was, and the reasons" disclosure: per ID, the chip, the comment's description as a 12px Ink Secondary snippet (whole words, never cut inside a code span, inline markdown rendered), and "Reason: …" on its own 13px line.
   - "New comments" and "Optional": each comment laid out like its ledger row, with ID badge · severity · blocking / non-blocking / optional · `file:line`, then the description and "Suggested fix:". Each block is the target of every link to its ID.
   - "Assessment".
   - Any other section, as it was written.
 - **What the panes drop:** the front matter and the final `VERDICT:` line, which the round heading already carries.
 - **Free-form reviews:** a review in that format (older loops) stays plain markdown.
-- **The coder pane** drops a leading "# Round N …" title (the round heading says it), and lists "Answers to the previous review" with each answer (fixed / declined: note) beside the grade the same round's review gave it.
+- **One home for each history:** what happened to a comment after it was raised is told once, in the ledger. The panes never repeat it.
+  - **Disputed:** when the coder said fixed and the reviewer found it unresolved, or the coder declined and the reviewer rejected that, the ledger step gets a serious "disputed" chip, and the ledger head counts them.
+- **A followed link:**
+  - lands on the comment block with the 2px ink outline and a hover-wash background;
+  - each block has a "Back to the comment list" link that returns focus to its ledger row, which is outlined too.
+- **The coder pane** drops a leading "# Round N …" title (the round heading says it). "Answers to the previous review" is a strip (ID badge, fixed / declined, "graded" and the chip the same round's review gave it), with the notes in a closed "The coder's notes" disclosure.
 - **Raw files:** both panes end with the raw file in a closed disclosure ("Coder summary file", "Review file"). Panes align to the top instead of stretching to the taller one.
 
 ### Next Steps
-- **Where:** beside the verdict line, at the top and in the closing recap, a 13px line gives the command to run next, in a code chip with a **Copy** mini button.
+- **Where:** inside the verdict band, at the top and at the end, a 13px line gives the command to run next, in a code chip with a **Copy** mini button.
 - **Which command:**
   - `/review-continue` for a loop that hit its round cap ("add a number for more rounds").
   - `/review-cancel` for an active or paused one.
 - **Never shown** on a shared page.
 
 ### Signature: Comment Ledger
-The top of a loop page, before the rounds. A 14px "Comments" title, then one plain sentence that answers the reader's first question ("4 comments, 2 blocking. All blocking comments were resolved.", or which blocking IDs are still open or unresolved). Below it is a table with one row per comment, in the order raised:
+The top of a loop page, before the rounds. A 14px "Comments" title, then one plain sentence of counts ("4 comments, 2 blocking, 1 disputed."); where the blocking comments stand is the verdict band's. Below it is a table with one row per comment, in the order raised:
 - **Comment:** the ID badge, severity · blocking / non-blocking / optional · `file:line` in Ink Secondary, the description, and "Suggested fix:" in 12px Ink Secondary.
 - **Raised:** the round.
-- **What happened:** each later round in which something changed. That is the coder's answer (fixed / declined: note) and the reviewer's grade, with grades that only repeat the previous one dropped.
-- **Status:** a chip.
+- **What happened:** each later round in which something changed: the coder's answer (fixed / declined: note) and the reviewer's grade. A step that changes nothing is dropped: a re-grade with the same status (a re-worded reason counts as new only while the comment is still contested), or the coder repeating its answer to an unchanged grade, which is summed up in one 12px Ink Secondary line, "Same answer and grade in rounds 4–5".
+- **Status:** a chip, with "since round N" beneath it in 12px Ink Secondary (the round whose review first gave that status).
   - Resolved is good; declined, accepted is neutral; unresolved and declined, rejected are serious.
   - A comment nobody graded reads "awaiting the next round" (active) while the loop runs. Once the loop is finished it reads "still open" (serious) if blocking, or "not addressed · optional" / "not addressed · non-blocking" (neutral).
 
