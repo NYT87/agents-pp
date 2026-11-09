@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>review-loop · two agents, one task</title>
+<meta name="description" content="review-loop is a Claude Code plugin: Claude writes the code, an independent CLI agent reviews the diff and raises numbered comments, and the loop runs until none is blocking.">
+<meta property="og:title" content="review-loop · two agents, one task">
+<meta property="og:description" content="One agent codes, the other reviews, until the reviewer has no comments left. Every round is a file you can audit.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/b612-regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/b612-bold.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face { font-family: "B612"; src: url("fonts/b612-regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "B612"; src: url("fonts/b612-bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+  @font-face { font-family: "B612 Mono"; src: url("fonts/b612-mono-regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "B612 Mono"; src: url("fonts/b612-mono-bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+
+  :root {
+    /* the flight deck the card is held over, and the laminated card itself */
+    --ground: #1d2327; --ground-ink: #e4e8ea; --ground-muted: #aeb6bb;
+    --card: #f6f6f1; --card-2: #ecece5; --ink: #111417; --ink-2: #3f464c; --muted: #5c6369; --rule: #9aa0a3; --rule-soft: #d4d6d1;
+    /* amber marks the challenge (the reviewer) and the section tabs; green marks a confirmed procedure */
+    --amber: #e8a500; --amber-soft: #fbe7b0; --green: #1b6b3f;
+    --sans: "B612", system-ui, sans-serif; --mono: "B612 Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --pad: clamp(16px, 4vw, 48px);
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ground); color-scheme: dark; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--ground); color: var(--ground-ink); font: 400 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--amber); color: var(--ink); }
+  a { color: inherit; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+  .card :focus-visible { outline-color: var(--ink); }
+  code, .mono { font-family: var(--mono); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  /* the deck: a thin bar on the dark ground above the card */
+  .deck { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; max-width: 1180px; margin: 0 auto; padding: 20px var(--pad) 18px; }
+  .deck .mark { font: 700 15px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; text-decoration: none; display: inline-flex; align-items: center; gap: 10px; }
+  .deck .mark svg { width: 22px; height: 22px; }
+  .deck nav { display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 14px; }
+  .deck nav a { color: var(--ground-muted); text-decoration: none; padding: 10px 0; }
+  .deck nav a:hover { color: var(--ground-ink); text-decoration: underline; }
+
+  /* the card: one laminated procedures card, seen once */
+  .card { max-width: 1180px; margin: 0 auto 56px; background: var(--card); color: var(--ink); border-radius: 14px; box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 18px 40px rgba(0,0,0,.35); overflow: hidden; }
+  .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 20px; padding: 14px var(--pad); background: var(--ink); color: var(--card); font: 700 13px/1.3 var(--sans); letter-spacing: .14em; text-transform: uppercase; }
+  .card-head span:last-child { font-family: var(--mono); font-weight: 400; letter-spacing: .04em; color: #c9ced1; }
+
+  /* a section of the card, its tab on the left edge */
+  .sec { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--rule-soft); }
+  .sec:first-of-type { border-top: 0; }
+  /* an index tab: flush with the card's left edge, square on that side, its words on the content line */
+  .tab { justify-self: start; margin: 28px 0 0; padding: 8px 16px 7px var(--pad); background: var(--amber); color: var(--ink); font: 700 13px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; border-radius: 0 4px 4px 0; }
+  .sec-body { padding: 20px var(--pad) 36px; }
+
+  /* checklist rows: number, challenge, dotted leader, response */
+  .items { list-style: none; margin: 0; padding: 0; }
+  .item { display: grid; grid-template-columns: 2.4em minmax(0, auto) minmax(24px, 1fr) minmax(0, max-content); align-items: baseline; column-gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--rule-soft); }
+  .item:last-child { border-bottom: 0; }
+  .item .n { font: 700 14px/1 var(--mono); color: var(--muted); }
+  .item .ch { font-weight: 700; letter-spacing: .06em; text-transform: uppercase; font-size: 15px; }
+  .item .lead { align-self: center; height: 0; border-bottom: 2px dotted var(--rule); transform-origin: left center; }
+  .item .re { text-align: right; font-size: 15px; }
+  .item .re.wide { text-align: left; }
+  .item-detail { grid-column: 2 / -1; margin: 6px 0 0; color: var(--ink-2); font-size: 15px; max-width: 64ch; }
+  @media (max-width: 700px) {
+    .item { grid-template-columns: 2.1em minmax(0, 1fr); }
+    .item .lead { display: none; }
+    .item .re, .item .re.wide { grid-column: 2; text-align: left; margin-top: 4px; }
+  }
+
+  /* first viewport: the title and BEFORE START beside the live challenge-and-response panel */
+  .first { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 0; }
+  .first > div { min-width: 0; }
+  .first .left { padding: 36px var(--pad) 36px; border-right: 1px solid var(--rule-soft); }
+  h1 { font: 700 clamp(40px, 6.2vw, 76px)/1.02 var(--sans); letter-spacing: -.01em; margin: 0 0 18px; text-wrap: balance; }
+  .lede { font-size: clamp(17px, 1.6vw, 19px); color: var(--ink-2); max-width: 46ch; margin: 0 0 28px; text-wrap: pretty; }
+  .first .tab { margin: 0 0 6px calc(-1 * var(--pad)); }
+  /* the commands, then the copy action as the box's bottom bar: lines break only at spaces */
+  .cmd { display: flex; flex-direction: column; margin: 8px 0 0; border: 1.5px solid var(--ink); border-radius: 8px; background: #fff; overflow: hidden; }
+  .cmd pre { margin: 0; padding: 12px 14px; font: 400 14px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: normal; }
+  .copy { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 0; border-top: 1.5px solid var(--ink); background: var(--ink); color: var(--card); font: 700 13px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+  .copy:hover { background: #2a3035; }
+  .copy svg { width: 16px; height: 16px; }
+  .copy.done { background: var(--green); }
+  .card .copy:focus-visible { outline: 3px solid var(--amber); outline-offset: -6px; }
+  .run-line { margin: 8px 0 0; font: 400 14px/1.6 var(--mono); padding: 10px 14px; border: 1.5px dashed var(--rule); border-radius: 8px; overflow-wrap: anywhere; }
+
+  /* the live panel: one real loop, run as challenge and response */
+  .first .right { padding: 28px var(--pad) 24px; background: var(--card-2); display: flex; flex-direction: column; }
+  .panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 16px; margin: 0 0 4px; }
+  .panel-head h2 { font: 700 13px/1.3 var(--sans); letter-spacing: .16em; text-transform: uppercase; margin: 0; }
+  .round-ind { font: 700 13px/1 var(--mono); padding: 6px 10px; border: 1.5px solid var(--ink); border-radius: 4px; }
+  .panel-note { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+  .cr { list-style: none; margin: 0; padding: 0; flex: 1; }
+  .cr > li { padding: 8px 0 6px; border-bottom: 1px solid var(--rule-soft); }
+  .cr .who { display: block; font: 700 12px/1.6 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 2px; }
+  .cr ul { list-style: none; margin: 0; padding: 0; }
+  /* a checklist row: ID, the words, a dotted leader, the response at the end */
+  .cr ul li { display: flex; align-items: flex-end; gap: 8px; font-size: 15px; line-height: 1.4; padding: 3px 0; }
+  .cr ul li .cid { align-self: flex-start; }
+  .cr ul li .say { flex: 0 1 auto; min-width: 0; }
+  .cr ul li .lead { flex: 1 1 18px; min-width: 18px; height: 0; margin-bottom: .42em; border-bottom: 2px dotted var(--rule); transform-origin: left center; }
+  .cr ul li .grade { flex: none; margin: 0; }
+  .cr ul li code { font-size: 13px; background: rgba(17,20,23,.07); padding: 0 4px; border-radius: 3px; }
+  .cr .cid { font: 700 13px/1 var(--mono); padding: 3px 6px; border: 1.5px solid var(--ink); border-radius: 3px; white-space: nowrap; }
+  .cr .challenge .who::before, .cr .regrade .who::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 7px; background: var(--amber); border: 1.5px solid var(--ink); }
+  .cr .response .who::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 7px; background: var(--card); border: 1.5px solid var(--ink); border-radius: 50%; }
+  .grade { display: inline-block; font: 700 12px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; padding: 4px 7px; border-radius: 3px; margin-right: 6px; white-space: nowrap; }
+  .grade.raised { background: var(--amber); border: 1.5px solid var(--ink); }
+  .grade.fixed { border: 1.5px solid var(--ink); }
+  .grade.unresolved { background: var(--amber-soft); border: 1.5px solid var(--ink); }
+  .grade.resolved { background: var(--green); color: #fff; border: 1.5px solid var(--green); }
+  .complete { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; margin: 12px 0 0; padding: 14px 16px; border: 2px solid var(--ink); border-radius: 6px; font: 700 14px/1.2 var(--sans); letter-spacing: .14em; text-transform: uppercase; }
+  .complete.on { background: var(--green); border-color: var(--green); color: #fff; }
+  .complete .sub { font: 400 13px/1.3 var(--mono); letter-spacing: 0; text-transform: none; }
+  .replay { margin-top: 12px; align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; background: transparent; border: 1.5px solid var(--ink); border-radius: 6px; color: var(--ink); font: 700 13px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+  .replay:hover { background: var(--card); }
+  .replay svg { width: 14px; height: 14px; }
+  /* the run, the page's one moment: each step's leaders draw from challenge to response,
+     then the response settles at the end. Without script, or with reduced motion, every
+     leader is drawn and every response shown. */
+  .js .cr > li { transition: opacity .3s ease-out; }
+  .js .cr .lead { transition: transform .55s cubic-bezier(.16,1,.3,1); }
+  .js .cr .grade { transition: opacity .25s ease-out .45s; }
+  .js .cr.running > li:not(.shown) { opacity: .18; }
+  .js .cr.running > li:not(.shown) .lead { transform: scaleX(0); }
+  .js .cr.running > li:not(.shown) .grade { opacity: 0; transition-delay: 0s; }
+  .js .cr > li.now { background: linear-gradient(90deg, var(--amber-soft), transparent 70%); }
+  @media (prefers-reduced-motion: reduce) { .js .cr > li, .js .cr .lead, .js .cr .grade { transition: none; } }
+  @media (max-width: 900px) {
+    .first { grid-template-columns: minmax(0, 1fr); }
+    .first .left { border-right: 0; border-bottom: 1px solid var(--rule-soft); }
+  }
+
+  /* procedure and quotes */
+  .sec h2.sec-title { font: 700 clamp(24px, 3vw, 34px)/1.15 var(--sans); margin: 0 0 6px; max-width: 30ch; text-wrap: balance; }
+  .task-quote { margin: 0 0 14px; max-width: 62ch; }
+  .task-quote figcaption { font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+  .task-quote blockquote { margin: 0; padding: 2px 0 2px 16px; border-left: 3px solid var(--ink); font-size: clamp(18px, 2vw, 22px); line-height: 1.4; }
+  .sec p.sec-lede { color: var(--ink-2); margin: 0 0 18px; max-width: 64ch; }
+  .sec-body p code, .item-detail code { font-size: .88em; background: rgba(17,20,23,.07); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+  .item-detail code.path { white-space: normal; overflow-wrap: anywhere; }
+  .record { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px 36px; align-items: start; }
+  @media (max-width: 820px) { .record { grid-template-columns: minmax(0, 1fr); } }
+  .files { list-style: none; margin: 0; padding: 0; counter-reset: f; }
+  .files li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 14px; padding: 9px 0; border-bottom: 1px solid var(--rule-soft); }
+  .files code { font-size: 14px; }
+  .files span { color: var(--ink-2); font-size: 14px; }
+  .file { margin: 0; border: 1.5px solid var(--ink); border-radius: 8px; background: #fff; overflow: hidden; }
+  .file figcaption { padding: 8px 14px; border-bottom: 1.5px solid var(--ink); font-size: 13px; color: var(--ink-2); background: var(--card-2); }
+  .file pre { margin: 0; padding: 14px; font: 400 13px/1.55 var(--mono); overflow-x: auto; }
+  .open-loop { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; margin-top: 22px; padding: 0 18px; background: var(--ink); color: var(--card); border-radius: 6px; font: 700 14px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; text-decoration: none; }
+  .open-loop:hover { background: #2a3035; }
+  .open-loop svg { width: 16px; height: 16px; }
+  .syn { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  .alt { margin: 18px 0 0; padding-top: 14px; border-top: 1px dashed var(--rule); color: var(--ink-2); max-width: 70ch; }
+
+  .card-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding: 18px var(--pad); background: var(--card-2); border-top: 1px solid var(--rule-soft); font-size: 14px; color: var(--ink-2); }
+  .card-foot a { color: var(--ink); }
+  .below { max-width: 1180px; margin: -36px auto 40px; padding: 0 var(--pad); font-size: 13px; color: var(--ground-muted); }
+</style>
+</head>
+<body>
+<header class="deck">
+  <a class="mark" href="./" aria-label="review-loop home">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="17" rx="2.5" fill="none" stroke="#e8a500" stroke-width="2"/><path d="M7 9.5h5M7 14.5h5" stroke="#e4e8ea" stroke-width="2" stroke-linecap="round"/><path d="m14.5 9.2 1.6 1.6 2.9-3M14.5 14.2l1.6 1.6 2.9-3" fill="none" stroke="#e8a500" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    review-loop
+  </a>
+  <nav aria-label="Site">
+    <a href="#procedure">How it works</a>
+    <a href="#real-loop">A real loop</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/NYT87/agents-pp">GitHub</a>
+  </nav>
+</header>
+
+<main class="card" id="top">
+  <div class="card-head" aria-hidden="true"><span>agents-pp · review-loop · normal procedures</span><span>RL-1 · v0.5.1</span></div>
+
+  <section class="first" aria-labelledby="title">
+    <div class="left">
+      <h1 id="title">Two agents, one task.</h1>
+      <p class="lede">One codes. A separate CLI agent reviews the diff and raises numbered comments; the coder answers each one, and the loop runs until none is blocking. Every round is a file you can audit.</p>
+      <h2 class="tab">Before start</h2>
+      <ol class="items">
+        <li class="item">
+          <span class="n">1</span><span class="ch">Install</span><span class="lead" aria-hidden="true"></span><span class="re">in Claude Code</span>
+          <div class="item-detail">
+            <div class="cmd"><pre id="install-cmd">claude plugin marketplace add NYT87/agents-pp
+claude plugin install review-loop@agents-pp</pre><button class="copy" type="button" data-copy="install-cmd"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Copy both lines</span></button></div>
+          </div>
+        </li>
+        <li class="item">
+          <span class="n">2</span><span class="ch">Run</span><span class="lead" aria-hidden="true"></span><span class="re">any task</span>
+          <div class="item-detail"><p class="run-line">/review-loop Add a divide() function with ValueError on zero, plus tests</p></div>
+        </li>
+        <li class="item">
+          <span class="n">3</span><span class="ch">Reviewer</span><span class="lead" aria-hidden="true"></span><span class="re"><code class="mono">codex</code> or <code class="mono">claude</code></span>
+        </li>
+      </ol>
+    </div>
+
+    <div class="right" id="run">
+      <div class="panel-head"><h2>Challenge and response</h2><span class="round-ind" id="round-ind" aria-live="off">Round 3 of 5</span></div>
+      <p class="panel-note">A real loop from this repository, quoted in short from its round files.</p>
+      <ol class="cr" id="cr">
+        <li class="step challenge" data-round="1"><span class="who">Round 1 · reviewer challenges</span><ul>
+          <li><span class="cid">R1-C1</span><span class="say">Effort choices use the backend-wide list instead of the selected model's levels.</span><span class="lead" aria-hidden="true"></span><span class="grade raised">Blocking</span></li>
+          <li><span class="cid">R1-C2</span><span class="say">Without a model cache, the effort list excludes <code>max</code> and <code>ultra</code>.</span><span class="lead" aria-hidden="true"></span><span class="grade raised">Blocking</span></li></ul></li>
+        <li class="step response" data-round="2"><span class="who">Round 2 · coder responds</span><ul>
+          <li><span class="cid">R1-C1</span><span class="say">Efforts resolved per listed model; backend-wide only as a fallback.</span><span class="lead" aria-hidden="true"></span><span class="grade fixed">Fixed</span></li>
+          <li><span class="cid">R1-C2</span><span class="say">Without a cache the backend reports no effort list at all.</span><span class="lead" aria-hidden="true"></span><span class="grade fixed">Fixed</span></li></ul></li>
+        <li class="step regrade" data-round="2"><span class="who">Round 2 · reviewer checks</span><ul>
+          <li><span class="cid">R1-C1</span><span class="say">A listed model with <code>efforts: []</code> still inherits the backend list.</span><span class="lead" aria-hidden="true"></span><span class="grade unresolved">Unresolved</span></li>
+          <li><span class="cid">R1-C2</span><span class="say">The no-cache fallback now reports empty lists.</span><span class="lead" aria-hidden="true"></span><span class="grade resolved">Resolved</span></li></ul></li>
+        <li class="step response" data-round="3"><span class="who">Round 3 · coder responds</span><ul>
+          <li><span class="cid">R1-C1</span><span class="say">A listed model's empty <code>efforts</code> is preserved; tests added.</span><span class="lead" aria-hidden="true"></span><span class="grade fixed">Fixed</span></li></ul></li>
+        <li class="step regrade" data-round="3"><span class="who">Round 3 · reviewer checks</span><ul>
+          <li><span class="cid">R1-C1</span><span class="say">Empty lists are preserved; backend levels only for unlisted models.</span><span class="lead" aria-hidden="true"></span><span class="grade resolved">Resolved</span></li></ul></li>
+      </ol>
+      <p class="complete on" id="complete"><span id="complete-title">Procedure complete · approved</span><span class="sub" id="complete-sub">round 3 of 5 · 0 blocking</span></p>
+      <button class="replay" type="button" id="replay" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M3.2 2.4v2.6h2.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>Run the loop again</button>
+    </div>
+  </section>
+
+  <section class="sec" id="procedure" aria-labelledby="procedure-tab">
+    <h2 class="tab" id="procedure-tab">The procedure</h2>
+    <div class="sec-body">
+      <p class="sec-lede">Each round is a challenge and a response, written to disk, until the reviewer approves, the round cap is reached, or you cancel.</p>
+      <ol class="items">
+        <li class="item"><span class="n">1</span><span class="ch">Coder</span><span class="lead" aria-hidden="true"></span><span class="re">implements the task</span>
+          <p class="item-detail">Claude does the work in your session and writes a summary of the round to <code>round-01-coder.md</code>.</p></li>
+        <li class="item"><span class="n">2</span><span class="ch">Reviewer</span><span class="lead" aria-hidden="true"></span><span class="re">challenges by ID</span>
+          <p class="item-detail">A separate CLI agent reads the diff and the summary, raises comments <code>R1-C1</code>, <code>R1-C2</code> with a severity and whether each is blocking, and ends with a verdict.</p></li>
+        <li class="item"><span class="n">3</span><span class="ch">Coder</span><span class="lead" aria-hidden="true"></span><span class="re">answers every ID</span>
+          <p class="item-detail">Each comment is fixed, or declined with a reason. The next review grades every answer: resolved, unresolved, or declined and accepted or rejected.</p></li>
+        <li class="item"><span class="n">4</span><span class="ch">Repeat</span><span class="lead" aria-hidden="true"></span><span class="re">until approved</span>
+          <p class="item-detail">The loop ends when the reviewer approves with no blocking comment, at the round cap, or when you cancel. <code>/review-continue</code> adds rounds to a loop that hit its cap.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="equipment-tab">
+    <h2 class="tab" id="equipment-tab">Equipment</h2>
+    <div class="sec-body">
+      <ol class="items">
+        <li class="item"><span class="n">1</span><span class="ch">Reviewer</span><span class="lead" aria-hidden="true"></span><span class="re">a separate agent</span>
+          <p class="item-detail">Codex or Claude as its own process, with its own model and reasoning effort. The coder never reviews its own work.</p></li>
+        <li class="item"><span class="n">2</span><span class="ch">Record</span><span class="lead" aria-hidden="true"></span><span class="re">every round on disk</span>
+          <p class="item-detail"><code class="path">.review-loop/&lt;id&gt;/round-NN-coder.md</code> and <code class="path">round-NN-review.md</code>: each agent reads the other's file, and you can audit the whole exchange afterwards.</p></li>
+        <li class="item"><span class="n">3</span><span class="ch">Stop hook</span><span class="lead" aria-hidden="true"></span><span class="re">holds Claude to the task</span>
+          <p class="item-detail">Installed as a plugin, a Stop hook keeps Claude on the loop until the reviewer approves or the round cap is reached.</p></li>
+        <li class="item"><span class="n">4</span><span class="ch">Presets</span><span class="lead" aria-hidden="true"></span><span class="re">focus each agent</span>
+          <p class="item-detail">By default the reviewer works as code reviewer, QA engineer and security engineer; the coder as architect, tech-stack evaluator, security, backend and SecOps engineer.</p></li>
+        <li class="item"><span class="n">5</span><span class="ch">Dashboard</span><span class="lead" aria-hidden="true"></span><span class="re">every loop on one page</span>
+          <p class="item-detail">A self-contained page of your loops, their comments and verdicts, and <code>--share</code> for a read-only copy to send a teammate.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="sec" id="real-loop" aria-labelledby="real-tab">
+    <h2 class="tab" id="real-tab">A real loop</h2>
+    <div class="sec-body">
+      <figure class="task-quote"><figcaption><code>task.md</code>, as the task was given</figcaption><blockquote>allow to select different models and reasoning for an agent, so it should display a list of the available models so the user can select, also select the effort</blockquote></figure>
+      <p class="sec-lede">The loop in the panel above, as it sits on disk: one folder, one file per agent per round, in a format both agents and scripts can read. Three rounds, approved in round 3 of 5.</p>
+      <div class="record">
+        <ol class="files" aria-label="The loop's files">
+          <li><code>task.md</code><span>the task as you gave it</span></li>
+          <li><code>round-01-coder.md</code><span>coder summary</span></li>
+          <li><code>round-01-review.md</code><span>changes requested · 2 blocking</span></li>
+          <li><code>round-02-coder.md</code><span>answers R1-C1, R1-C2</span></li>
+          <li><code>round-02-review.md</code><span>changes requested · 1 blocking</span></li>
+          <li><code>round-03-coder.md</code><span>answers R1-C1</span></li>
+          <li><code>round-03-review.md</code><span>approved</span></li>
+          <li><code>state.json</code><span>rounds, times, verdicts</span></li>
+        </ol>
+        <figure class="file">
+          <figcaption><code>round-01-review.md</code> (opening, abridged)</figcaption>
+<pre>---
+verdict: changes_requested
+round: 1
+backend: codex
+model: default
+blocking: 2
+generated_at: 2026-10-19T23:26:05Z
+---
+
+## Comments
+
+### R1-C1
+- severity: medium
+- blocking: yes
+- file: plugins/review-loop/.../dashboard.html
+- line: 705
+- description: Effort choices use the backend-wide
+  union instead of the selected model's supported levels.</pre>
+        </figure>
+      </div>
+      <a class="open-loop" href="loop/#/loop/20261020-080121-419ce6">Open the full loop<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <p class="syn">The full record is the dashboard's read-only share page for this loop: every round, the comment ledger, and the verdicts.</p>
+    </div>
+  </section>
+
+  <section class="sec" id="install" aria-labelledby="install-tab">
+    <h2 class="tab" id="install-tab">Install</h2>
+    <div class="sec-body">
+      <ol class="items">
+        <li class="item"><span class="n">1</span><span class="ch">Requirements</span><span class="lead" aria-hidden="true"></span><span class="re wide">Claude Code, <code class="mono">jq</code>, optionally <code class="mono">git</code></span>
+          <p class="item-detail">A reviewer CLI: <a href="https://github.com/openai/codex">Codex</a> for the default backend, or Claude Code itself with <code>--backend claude</code>. <code>python3</code> only to serve the dashboard.</p></li>
+        <li class="item"><span class="n">2</span><span class="ch">Plugin</span><span class="lead" aria-hidden="true"></span><span class="re">in Claude Code</span>
+          <div class="item-detail"><div class="cmd"><pre id="install-cmd-2">claude plugin marketplace add NYT87/agents-pp
+claude plugin install review-loop@agents-pp</pre><button class="copy" type="button" data-copy="install-cmd-2"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Copy both lines</span></button></div></div></li>
+      </ol>
+      <p class="alt"><strong>Without the plugin:</strong> the skill folders also work copied into <code>~/.claude/skills/</code>; add the Stop hook to your settings for the same enforcement. See the <a href="https://github.com/NYT87/agents-pp#readme">README</a>.</p>
+    </div>
+  </section>
+
+  <footer class="card-foot"><span>agents-pp · MIT licence · Jose Miguel Navarro</span><span><a href="https://github.com/NYT87/agents-pp">github.com/NYT87/agents-pp</a></span></footer>
+</main>
+<p class="sr-only" role="status" id="copy-status"></p>
+<p class="below">Set in B612, the open typeface Airbus designed for cockpit displays (SIL Open Font License).</p>
+
+<script>
+(function () {
+  'use strict';
+  document.documentElement.classList.add('js');
+
+  // Copy buttons: the command text, with a short confirmation on the button.
+  document.querySelectorAll('[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var text = document.getElementById(b.dataset.copy).textContent, label = b.querySelector('span');
+      var done = function (msg, ok) { label.textContent = msg; document.getElementById('copy-status').textContent = ok ? 'Install commands copied' : 'Could not copy; select the commands to copy them'; b.classList.toggle('done', ok); setTimeout(function () { label.textContent = 'Copy both lines'; b.classList.remove('done'); }, 1800); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { done('Copied', true); }, function () { done('Select to copy', false); });
+      else done('Select to copy', false);
+    });
+  });
+
+  // The signature run: the real loop plays as challenge and response, round
+  // by round, until the procedure is complete. Without script, or with
+  // reduced motion, the finished record simply shows.
+  var list = document.getElementById('cr'), steps = Array.prototype.slice.call(list.children);
+  var ind = document.getElementById('round-ind'), complete = document.getElementById('complete'), replay = document.getElementById('replay');
+  var title = document.getElementById('complete-title'), sub = document.getElementById('complete-sub');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var timer = null;
+  function finish() {
+    clearTimeout(timer); list.classList.remove('running'); list.removeAttribute('aria-busy');
+    steps.forEach(function (s) { s.classList.add('shown'); s.classList.remove('now'); });
+    ind.textContent = 'Round 3 of 5'; complete.classList.add('on');
+    title.textContent = 'Procedure complete · approved'; sub.textContent = 'round 3 of 5 · 0 blocking';
+  }
+  function run() {
+    if (reduce.matches) { finish(); return; }
+    clearTimeout(timer); list.classList.add('running'); list.setAttribute('aria-busy', 'true'); complete.classList.remove('on');
+    title.textContent = 'In progress';
+    steps.forEach(function (s) { s.classList.remove('shown', 'now'); });
+    var i = 0;
+    (function next() {
+      steps.forEach(function (s) { s.classList.remove('now'); });
+      if (i >= steps.length) { timer = setTimeout(finish, 500); return; }
+      var s = steps[i++];
+      ind.textContent = 'Round ' + s.dataset.round + ' of 5'; sub.textContent = 'round ' + s.dataset.round + ' of 5';
+      s.classList.add('shown', 'now');
+      timer = setTimeout(next, s.classList.contains('regrade') ? 1150 : 850);
+    })();
+  }
+  // Replay only where the run can play: reduced motion shows the finished record.
+  var showReplay = function () { replay.hidden = reduce.matches; };
+  showReplay();
+  if (reduce.addEventListener) reduce.addEventListener('change', function () { showReplay(); if (reduce.matches) finish(); });
+  replay.addEventListener('click', run);
+  // Start the run once, when the panel is first in view.
+  if ('IntersectionObserver' in window && !reduce.matches) {
+    var io = new IntersectionObserver(function (es) { if (es[0].isIntersecting) { io.disconnect(); run(); } }, { threshold: 0.4 });
+    io.observe(list);
+  }
+})();
+</script>
+</body>
+</html>

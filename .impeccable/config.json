@@ -1,0 +1,38 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "b612",
+        "createdAt": "2026-10-23T15:08:52.636Z",
+        "reason": "homepage (site/) is its own world chosen by the user in the direction round; root DESIGN.md documents the dashboard"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "b612 mono",
+        "createdAt": "2026-10-23T15:08:52.852Z",
+        "reason": "homepage (site/) is its own world chosen by the user in the direction round; root DESIGN.md documents the dashboard"
+      },
+      {
+        "rule": "repeated-container-text",
+        "value": "*",
+        "files": [
+          "site/index.html"
+        ],
+        "createdAt": "2026-10-23T15:12:29.698Z",
+        "reason": "assistant judgement: comment IDs repeat by design; following R1-C1 through the rounds is the page's demonstration"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "site/index.html"
+        ],
+        "createdAt": "2026-10-23T15:12:29.717Z",
+        "reason": "assistant judgement: static read misses the card header's padding (14px block, clamp(16px,4vw,48px) inline); rendered captures show the text inset"
+      }
+    ]
+  }
+}
