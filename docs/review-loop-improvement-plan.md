@@ -25,7 +25,10 @@ Start with protocol enforcement and prompt improvements. Introduce snapshotting
 before incremental review or executable approval gates. Evaluate the resulting
 reviewer before investing in additional reviewer agents.
 
-This document complements [the existing role-based plan](../PLAN.md), without
+This document complements the role-based plan, now tracked as GitHub issues
+[#7](https://github.com/NYT87/agents-pp/issues/7) (multi-reviewer pipeline),
+[#8](https://github.com/NYT87/agents-pp/issues/8) (native Codex review gate) and
+[#9](https://github.com/NYT87/agents-pp/issues/9) (stricter approval), without
 replacing it. That plan proposes additional roles, a native Codex review gate,
 and broader reviewer permissions. Here, additional roles and native review are
 deferred. Any required gate introduced later must fail closed on execution
